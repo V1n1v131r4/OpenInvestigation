@@ -14,6 +14,33 @@ Open [http://127.0.0.1:8080](http://127.0.0.1:8080). Use `docker compose logs -f
 
 If you upgraded from OSINT Local, keep using the same project directory and Compose project name so Docker attaches the existing case volume.
 
+## Configure API keys
+
+Create a `.env` file next to `compose.yaml`. If you already have one, keep it and add any missing variables from the template.
+
+```sh
+test -f .env || cp .env.example .env
+```
+
+Open `.env` in a text editor and fill in only the integrations you want to use. All keys are optional. Leave unused values blank.
+
+```dotenv
+OPENAI_API_KEY=
+ANTHROPIC_API_KEY=
+OPENCODE_API_KEY=
+MWMBL_API_KEY=
+VIRUSTOTAL_API_KEY=
+THREATFOX_AUTH_KEY=
+SHODAN_API_KEY=
+RANSOMWARE_LIVE_API_KEY=
+```
+
+Keep your actual keys in the local `.env`. Git ignores this file. After adding or changing keys, recreate the app container so Docker Compose loads them.
+
+```sh
+docker compose up -d osint
+```
+
 ## Investigate a case
 
 1. Enter up to 20 inputs, one per line. Supported inputs include IPv4, IPv6, domains, URLs, hashes, APT group names and aliases, and free-text search terms. Prefix a User-Agent with `ua:`.
@@ -54,7 +81,7 @@ MISP Galaxy and official publications do not require an API token. To enable the
 
 ## Assessment models
 
-Copy `.env.example` to `.env` if you do not already have one. Fill in only the credentials you want to use. OpenInvestigation tries models in this order:
+After [configuring your API keys](#configure-api-keys), OpenInvestigation tries models in this order:
 
 1. **GPT-5 Mini** when `OPENAI_API_KEY` is set. Override it with `OSINT_OPENAI_MODEL`.
 2. **Claude Sonnet 4.6** when `ANTHROPIC_API_KEY` is set. Override it with `OSINT_ANTHROPIC_MODEL`.
