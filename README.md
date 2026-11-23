@@ -92,3 +92,12 @@ Free-model availability and quotas can change. For frequent use, configure your 
 ## Test
 
 Run the controlled tests with `python3 -m unittest -q`. The live Docker test is opt-in. Older cases and original source passages retain their stored language. New model assessments are requested in English.
+
+<img width="1184" height="633" alt="Screenshot 2026-11-23 at 11 56 48" src="https://github.com/user-attachments/assets/9a032e37-d102-4955-adcd-ae4bb6f8951b" />
+
+<img width="1184" height="799" alt="Screenshot 2026-11-23 at 11 57 06" src="https://github.com/user-attachments/assets/8ce330b6-8322-4a59-8edf-292090b26202" />
+
+<img width="1184" height="741" alt="Screenshot 2026-11-23 at 11 57 20" src="https://github.com/user-attachments/assets/52b4d744-b65b-4fed-ad32-e4762b09a299" />
+
+
+
