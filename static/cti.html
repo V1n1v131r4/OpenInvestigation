@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OpenInvestigation</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/cti.js" defer></script>
+</head>
+<body>
+  <header class="top">
+    <div class="brand"><span class="investigation-mark" aria-hidden="true"></span> OpenInvestigation</div>
+    <span class="muted">Threat intelligence</span>
+  </header>
+  <div class="layout cti-layout">
+    <aside class="sidebar">
+      <h2>New investigation</h2>
+      <form id="cti-new">
+        <label>Case name <small>optional</small><input name="title" maxlength="150"></label>
+        <label>IOCs, APT groups, or search terms<textarea name="seeds" required maxlength="7000" rows="5" placeholder="192.0.2.80&#10;example.org&#10;APT28"></textarea></label>
+        <p class="muted">Enter one IP address, domain, URL, hash, or term per line. For a User-Agent, prefix it with <code>ua:</code>.</p>
+        <button class="primary">Investigate</button>
+      </form>
+      <h2>Investigations</h2>
+      <nav id="cti-cases" aria-label="Investigations"></nav>
+      <h2>Enabled sources</h2>
+      <p class="muted" id="cti-sources"></p>
+      <h2>MISP events</h2>
+      <form id="cti-import">
+        <label>JSON file<input id="cti-file" type="file" accept=".json,application/json" required></label>
+        <button>Import events</button>
+      </form>
+      <p id="cti-imported" role="status" class="muted"></p>
+    </aside>
+    <main>
+      <p id="cti-error" role="alert" hidden></p>
+      <section id="cti-empty" class="empty">
+        <span class="investigation-mark" aria-hidden="true"></span>
+        <h1>Threat investigations</h1>
+        <p>Enter indicators, APT groups, or search terms to find events, reports, and documented relationships.</p>
+      </section>
+      <div id="cti-workspace" hidden>
+        <div class="case-header">
+          <div><h1 id="cti-title"></h1><p id="cti-seeds" class="muted"></p></div>
+          <div class="exports"><button id="cti-expand" type="button" class="primary">Run investigation again</button><button id="cti-assessment" type="button" hidden>Retry assessment</button><button id="cti-export" type="button">Export JSON</button><button id="cti-export-stix" type="button">Export STIX 2.1</button></div>
+        </div>
+        <div class="counts" id="cti-counts" role="status"></div>
+        <section class="panel graph-panel">
+          <header class="graph-header">
+            <div><h2>Relationship graph</h2><p class="muted">Select a node to view its evidence. Drag the background to pan.</p></div>
+            <div class="graph-controls" role="group" aria-label="Graph zoom">
+              <button id="cti-zoom-out" aria-label="Zoom out">−</button>
+              <output id="cti-zoom-level">100%</output>
+              <button id="cti-zoom-in" aria-label="Zoom in">+</button>
+              <button id="cti-fit">Fit graph</button>
+            </div>
+          </header>
+          <div class="graph-area">
+            <div id="cti-graph" role="region" aria-label="Threat intelligence relationship graph" tabindex="0">
+              <div id="cti-scene"></div>
+            </div>
+            <aside id="cti-detail" class="graph-detail" aria-labelledby="cti-detail-title" hidden>
+              <header><h2 id="cti-detail-title">Node details</h2><button id="cti-close" aria-label="Close details">×</button></header>
+              <div id="cti-inspector" class="panel-body"></div>
+            </aside>
+          </div>
+        </section>
+        <section class="panel cti-conclusion" aria-labelledby="cti-conclusion-title">
+          <header><h2 id="cti-conclusion-title">Case assessment</h2></header>
+          <div class="panel-body">
+            <p id="cti-conclusion-status" class="muted" role="status"></p>
+            <div id="cti-conclusion-content" hidden>
+              <p id="cti-conclusion-text"></p>
+              <p id="cti-conclusion-model" class="muted"></p>
+              <div id="cti-claims"></div>
+              <div id="cti-hypotheses"></div>
+              <details id="cti-conclusion-sources" hidden>
+                <summary>Cited sources</summary>
+                <ol id="cti-conclusion-citations"></ol>
+              </details>
+            </div>
+          </div>
+        </section>
+        <details class="panel cti-disclosure">
+          <summary>Coverage and run history</summary>
+          <div class="panel-body" id="cti-rounds"></div>
+        </details>
+        <details class="panel cti-disclosure">
+          <summary>Timeline</summary>
+          <div class="panel-body" id="cti-timeline"></div>
+        </details>
+        <details class="panel cti-disclosure">
+          <summary>Related cases</summary>
+          <div class="panel-body" id="cti-related"></div>
+        </details>
+        <details id="cti-activity" class="panel cti-disclosure">
+          <summary>Live activity <span id="cti-event-count" class="muted"></span></summary>
+          <ol id="events" aria-label="Recent events"></ol>
+        </details>
+        <details class="panel cti-disclosure">
+          <summary>Add a public reference</summary>
+          <div class="panel-body">
+            <form id="cti-reference">
+              <label>Group or alias<input name="origin" required maxlength="200"></label>
+              <label>Category<select name="category">
+                <option value="forum">Forum mention</option>
+                <option value="group_handle">Published group handle</option>
+                <option value="attribution">Attribution documented by a public source</option>
+              </select></label>
+              <label>Title<input name="title" required maxlength="250"></label>
+              <label>Public URL<input name="url" type="url" required maxlength="1500"></label>
+              <label>What the source says<textarea name="detail" required maxlength="1000" rows="2"></textarea></label>
+              <button>Add reference</button>
+            </form>
+          </div>
+        </details>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OSINT Local</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header class="top">
+    <div class="brand"><span class="mark" aria-hidden="true">◎</span> OSINT Local</div>
+    <a href="/cti">Abrir CTI Local</a>
+    <span id="connection" class="connection">Conectando</span>
+  </header>
+  <div class="layout">
+    <aside class="sidebar">
+      <h2>Novo caso</h2>
+      <form id="new-case">
+        <label>Tipo de alvo
+          <select name="target_type"><option value="organization">Organização</option><option value="individual">Pessoa</option></select>
+        </label>
+        <label>Nome do alvo<input name="target" required maxlength="200" autocomplete="off"></label>
+        <label><span id="reference-label">Domínio oficial</span><input name="reference" id="target-reference" required maxlength="300" placeholder="exemplo.com.br"></label>
+        <a id="reference-preview" target="_blank" rel="noopener noreferrer" hidden>Abrir referência para conferir</a>
+        <label class="confirm"><input name="confirmed" type="checkbox" required> Confirmei que o nome e a referência são do mesmo alvo.</label>
+        <label>Objetivo <small>opcional</small><textarea name="goal" maxlength="500" rows="2"></textarea></label>
+        <button class="primary">Iniciar coleta</button>
+      </form>
+      <h2>Casos</h2>
+      <nav id="cases" aria-label="Casos"></nav>
+      <h2>Fontes habilitadas</h2>
+      <div id="sources" class="sources"></div>
+      <button id="show-diagnostics" type="button">Diagnóstico das fontes</button>
+    </aside>
+    <main>
+      <div id="error" role="alert" hidden></div>
+      <section class="panel" id="diagnostics" hidden>
+        <header class="diagnostics-header">
+          <h2>Diagnóstico das fontes</h2>
+          <button id="close-diagnostics" type="button">Fechar</button>
+        </header>
+        <div class="panel-body">
+          <p>Usa consultas públicas de controle. Os resultados não são adicionados aos casos.</p>
+          <button id="run-diagnostics" type="button" class="primary">Testar fontes</button>
+          <p id="diagnostic-time" class="muted" role="status"></p>
+          <ul id="diagnostic-results" aria-label="Resultados do diagnóstico"></ul>
+        </div>
+      </section>
+      <section id="empty" class="empty">
+        <span class="mark" aria-hidden="true">◎</span>
+        <h1>Investigações</h1>
+        <p>Crie um caso para iniciar a coleta ou abra um caso salvo.</p>
+      </section>
+      <div id="workspace" hidden>
+        <div class="case-header">
+          <div><h1 id="title"></h1><p id="goal" class="muted"></p><p id="case-identity" class="muted"></p></div>
+          <div class="exports"><button id="expand" type="button" class="primary">Ampliar com evidências confirmadas</button><button id="rerun" type="button">Repetir coleta</button><button id="export-json" type="button">Exportar evidências</button><button id="export-md" type="button">Relatório Markdown</button></div>
+        </div>
+        <div class="counts" id="metrics"></div>
+        <p id="expansion-note" class="muted" role="status"></p>
+        <section class="panel" id="institution" hidden>
+          <header><h2>Dados da instituição</h2></header>
+          <div class="panel-body" id="institution-results"></div>
+        </section>
+        <div class="investigation">
+          <section class="panel">
+            <header class="graph-header">
+              <div><h2>Grafo de investigação</h2><p id="graph-help" class="muted">Selecione um resultado para conferir a fonte ou seguir a investigação.</p></div>
+              <button id="graph-home" type="button">Voltar ao alvo</button>
+            </header>
+            <div id="graph" role="region" aria-label="Mapa de buscas e evidências" aria-describedby="graph-help" tabindex="0"></div>
+          </section>
+          <div class="rail">
+            <section class="panel">
+              <header><h2>Evidência selecionada</h2></header>
+              <div class="panel-body" id="inspector"><p class="muted">Selecione um resultado para conferir, confirmar ou invalidar. A busca pode continuar a partir dele.</p></div>
+            </section>
+            <section class="panel">
+              <header><h2>Atividade ao vivo</h2></header>
+              <ol id="events" aria-label="Eventos recentes"></ol>
+            </section>
+          </div>
+        </div>
+        <div class="research">
+          <section class="panel">
+            <header><h2>Busca avançada</h2></header>
+            <div class="panel-body">
+              <div id="discovery-options"></div>
+              <form id="manual-search">
+                <label>Termo principal<input name="term" maxlength="160" required></label>
+                <label>Nome alternativo<input name="alias" maxlength="100"></label>
+                <label>Domínio<input name="domain" placeholder="gov.br" maxlength="120"></label>
+                <div class="fields">
+                  <label>Tipo de arquivo<select name="extension"><option value="">Todos</option><option>pdf</option><option>csv</option><option>docx</option></select></label>
+                  <label>Publicado após<input name="after" type="date"></label>
+                  <label>Publicado antes de<input name="before" type="date"></label>
+                </div>
+                <button id="compose-query" type="button">Montar consulta</button>
+                <label>Consulta editável<textarea name="query" maxlength="400" rows="2" required></textarea></label>
+                <p id="manual-parent" class="muted"></p>
+                <button class="primary">Registrar consulta</button>
+              </form>
+              <div id="manual-list"></div>
+            </div>
+          </section>
+          <section class="panel">
+            <header><h2>Fontes brasileiras</h2></header>
+            <div class="panel-body">
+              <label>O que você tem em mãos
+                <select id="source-type">
+                  <option value="all">Todas as entradas</option>
+                  <option value="name">Razão social ou tema</option>
+                  <option value="cnpj">CNPJ</option>
+                  <option value="place">Município ou estado</option>
+                  <option value="process">Número de processo</option>
+                </select>
+              </label>
+              <div id="catalog"></div>
+              <a href="https://github.com/osintbrazuca/osint-brazuca" target="_blank" rel="noopener noreferrer">Catálogo OSINT Brazuca</a>
+            </div>
+          </section>
+        </div>
+        <section class="panel hypotheses" id="capture-panel" hidden>
+          <header><h2>Capturar evidência</h2></header>
+          <div class="panel-body">
+            <form id="capture">
+              <label>Consulta de origem<select name="search_id" required></select></label>
+              <label>Fonte<input name="source" maxlength="100" required placeholder="Ex. Diário Oficial da União"></label>
+              <label>Título<input name="title" maxlength="300" required></label>
+              <label>URL original<input name="url" type="url" maxlength="2000" required></label>
+              <label>Data de publicação<input name="published_at" type="date"></label>
+              <label>Trecho relevante<textarea name="excerpt" maxlength="1000" rows="3" required></textarea></label>
+              <button class="primary">Salvar evidência</button>
+            </form>
+          </div>
+        </section>
+        <section class="panel hypotheses">
+          <header><h2>Validação de hipóteses</h2></header>
+          <div class="panel-body">
+            <form id="review">
+              <label>Hipótese<input name="claim" maxlength="500" required></label>
+              <label>Justificativa<textarea name="rationale" maxlength="1500" rows="2" required></textarea></label>
+              <div id="evidence-list"></div>
+              <button class="primary">Salvar avaliação</button>
+            </form>
+            <div id="reviews"></div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

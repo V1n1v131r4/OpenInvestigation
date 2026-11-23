@@ -1,0 +1,13 @@
+[
+  {
+    "ioc": "143.198.64.151",
+    "publisher": "CYFIRMA",
+    "url": "https://www.cyfirma.com/research/osint-investigation-hunting-malicious-infrastructure-linked-to-transparent-tribe/",
+    "title": "OSINT Investigation: Hunting Malicious Infrastructure Linked to Transparent Tribe",
+    "published": "2024-09-27",
+    "associations": [
+      {"kind": "Grupo", "value": "Transparent Tribe", "detail": "Historical attribution from the research report, which identifies the group as APT36."},
+      {"kind": "Ferramenta", "value": "Mythic", "detail": "The report describes Mythic use in the observed infrastructure."}
+    ]
+  }
+]
