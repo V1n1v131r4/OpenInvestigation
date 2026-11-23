@@ -1,6 +1,10 @@
 # OpenInvestigation
 
-OpenInvestigation is a local threat investigation workspace. It collects and correlates public evidence, visualizes relationships, and produces an assessment that links back to the evidence.
+OpenInvestigation is a self-hosted threat investigation workspace. It collects and correlates public evidence, maps relationships, and produces a case assessment whose citations lead back to the original evidence.
+
+Docker Compose runs the application and a local SearXNG instance. The application keeps cases, evidence, and imported **MISP event JSON** in a local SQLite volume. The MISP import and correlation workflow is built in and works without a separate MISP server.
+
+**OpenCode runs inside the application container** and invokes the configured model to generate an assessment. With the default free OpenCode models or configured OpenAI and Anthropic keys, inference runs at the hosted provider. SearXNG and the source connectors also make external requests when enabled.
 
 ## Run locally
 
@@ -53,7 +57,7 @@ docker compose up -d osint
 
 | Source | What it adds |
 |---|---|
-| Local MISP | Imported MISP events, exact matches, and co-occurrences |
+| Local MISP event index | Imported MISP event JSON stored in SQLite, exact matches, and co-occurrences |
 | CIRCL OSINT | Public feed entries for matching indicators |
 | ThreatDefence | Published indicators, reported confidence, review dates, and detection references |
 | MITRE ATT&CK | Group aliases, campaigns, malware, techniques, and references |
