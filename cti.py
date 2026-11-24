@@ -926,6 +926,10 @@ def initialize(conn):
         conn.execute("UPDATE cti_cases SET tlp='CLEAR'")
     if "source_prefs" not in case_columns:
         conn.execute("ALTER TABLE cti_cases ADD COLUMN source_prefs TEXT NOT NULL DEFAULT '{}'")
+    for column, kind, default in (("notes", "TEXT", "''"), ("tags", "TEXT", "'[]'"),
+                                  ("owner", "TEXT", "''"), ("archived", "INTEGER", "0")):
+        if column not in case_columns:
+            conn.execute(f"ALTER TABLE cti_cases ADD COLUMN {column} {kind} NOT NULL DEFAULT {default}")
     conn.execute("UPDATE cti_cases SET status='interrupted' WHERE status IN ('running','queued')")
 
     conn.execute("UPDATE cti_rounds SET status='interrupted' WHERE status='running'")
@@ -1078,6 +1082,11 @@ def snapshot(conn, case_id):
         case["source_prefs"] = json.loads(case.get("source_prefs") or "{}")
     except ValueError:
         case["source_prefs"] = {}
+    try:
+        case["tags"] = json.loads(case.get("tags") or "[]")
+    except ValueError:
+        case["tags"] = []
+    case["archived"] = bool(case.get("archived"))
     case["relations"] = [dict(json.loads(item["payload"]), id=item["id"], review=item["review"]) for item in
                          conn.execute("SELECT * FROM cti_relations WHERE case_id=? ORDER BY id", (case_id,))]
     for row in case["relations"]:

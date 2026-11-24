@@ -80,6 +80,7 @@ docker compose up -d osint
 3. Use **Case assessment** below the graph to review the conclusion, claims, hypotheses, and cited evidence. The orange confidence badge explains the score on a 0–5 scale. Each evidence item carries an Admiralty code (e.g. `B2`): a source-reliability letter from `reliability.json` and an information-credibility number. A text match confirms the term is present, not that the claim is true.
 4. Confirm or reject individual evidence items. If you reject a cited item, the assessment and its confidence become out of date. **Reassess case** uses the stored evidence. **Run investigation again** searches confirmed entities when available and otherwise uses the original targets.
 5. Open **Coverage and run history**, **Timeline**, or **Related cases** to compare collection runs, distinguish activity and publication dates, and open earlier evidence. Export the case as JSON or export supported observables and source notes as STIX 2.1.
+6. Under **Case details**, record an owner, tags, and notes. Use **Archive** to keep a finished case out of the way, or **Delete** to remove a case and all its evidence (you are asked to confirm).
 
 ## Sources
 

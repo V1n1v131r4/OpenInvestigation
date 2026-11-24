@@ -378,7 +378,7 @@ class Handler(BaseHTTPRequestHandler):
         if parts == ["api", "cti"]:
             with database() as conn:
                 cases = [dict(row) for row in conn.execute(
-                    "SELECT id,title,status FROM cti_cases ORDER BY id DESC")]
+                    "SELECT id,title,status,archived FROM cti_cases ORDER BY id DESC")]
                 imported = conn.execute("SELECT count(*) FROM cti_misp").fetchone()[0]
             return self.send_json({"cases": cases, "sources": cti.configured_sources(),
                                    "imported": imported, "session": SESSION})
@@ -508,6 +508,29 @@ class Handler(BaseHTTPRequestHandler):
                                          labels[category], "Registro manual", reference=url, detail=note,
                                          confidence="Documentada pela fonte" if category == "attribution" else "A conferir")]
                     response = {"added": cti.save(conn, case_id, rows)}
+                elif parts[1] == "meta":
+                    notes = field(data, "notes", 5000, required=False)
+                    owner = field(data, "owner", 100, required=False)
+                    raw_tags = data.get("tags")
+                    if raw_tags is not None and not isinstance(raw_tags, list):
+                        raise ValueError("Send tags as a list of strings.")
+                    tags = [tag.strip()[:60] for tag in (raw_tags or []) if isinstance(tag, str) and tag.strip()][:30]
+                    conn.execute("UPDATE cti_cases SET notes=?, owner=?, tags=? WHERE id=?",
+                                 (notes, owner, json.dumps(tags, ensure_ascii=False), case_id))
+                    response = {"id": case_id, "tags": tags}
+                elif parts[1] == "archive":
+                    archived = 1 if data.get("archived") else 0
+                    conn.execute("UPDATE cti_cases SET archived=? WHERE id=?", (archived, case_id))
+                    response = {"id": case_id, "archived": bool(archived)}
+                elif parts[1] == "delete":
+                    if case["status"] in ("queued", "running"):
+                        raise ValueError("Wait for the investigation to finish before deleting the case.")
+                    conn.execute("DELETE FROM cti_entity_index WHERE relation_id IN "
+                                 "(SELECT id FROM cti_relations WHERE case_id=?)", (case_id,))
+                    for table in ("cti_relations", "cti_events", "cti_rounds", "cti_queries"):
+                        conn.execute(f"DELETE FROM {table} WHERE case_id=?", (case_id,))
+                    conn.execute("DELETE FROM cti_cases WHERE id=?", (case_id,))
+                    response = {"deleted": case_id}
                 else:
                     raise LookupError("CTI route not found.")
             else:

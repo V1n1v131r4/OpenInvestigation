@@ -206,7 +206,7 @@ async function home() {
   $("cti-sources").textContent = data.sources.map(label).join(" · ");
   $("cti-imported").textContent = data.imported + " event(s) in the local index.";
   $("cti-cases").replaceChildren(...data.cases.map((item) => {
-    const button = el("button", item.title);
+    const button = el("button", item.title + (item.archived ? " · archived" : ""), item.archived ? "muted" : undefined);
     button.setAttribute("aria-current", String(item.id === selectedCase));
     button.onclick = () => openCase(item.id);
     return button;
@@ -612,8 +612,14 @@ function render(data) {
   snapshot = data;
   $("cti-empty").hidden = true;
   $("cti-workspace").hidden = false;
-  $("cti-title").textContent = data.title;
+  $("cti-title").textContent = data.title + (data.archived ? " · archived" : "");
   $("cti-seeds").textContent = data.seeds.map((seed) => seed.value).join(" · ");
+  $("cti-archive").textContent = data.archived ? "Unarchive" : "Archive";
+  if (!previous || previous.id !== data.id) {  // populate the editable details only when the case changes
+    $("cti-meta").owner.value = data.owner || "";
+    $("cti-meta").tags.value = (data.tags || []).join(", ");
+    $("cti-meta").notes.value = data.notes || "";
+  }
   const active = ["queued", "running"].includes(data.status);
   const labels = {queued: "Queued", running: "Search in progress", partial: "Search finished · partial results",
     done: "Search finished", empty: "Search finished · no relationships", interrupted: "Search interrupted"};
@@ -719,6 +725,42 @@ onSubmit($("cti-reference"), async (fields) => {
   await request("/api/cti/" + caseId + "/reference", fields);
   if (selectedCase === caseId) await refresh(caseId);
 });
+$("cti-meta").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const caseId = selectedCase;
+  const form = event.target;
+  const button = form.querySelector("button");
+  button.disabled = true;
+  $("cti-error").hidden = true;
+  try {
+    const tags = form.tags.value.split(",").map((tag) => tag.trim()).filter(Boolean);
+    await request("/api/cti/" + caseId + "/meta", {owner: form.owner.value, notes: form.notes.value, tags});
+  } catch (error) {
+    showError(error);
+  } finally {
+    button.disabled = false;
+  }
+});
+$("cti-archive").onclick = async () => {
+  const caseId = selectedCase;
+  try {
+    await request("/api/cti/" + caseId + "/archive", {archived: !snapshot?.archived});
+    if (selectedCase === caseId) { await refresh(caseId); await home(); }
+  } catch (error) { showError(error); }
+};
+$("cti-delete").onclick = async () => {
+  const caseId = selectedCase;
+  if (!confirm("Delete this case and all of its evidence? This cannot be undone.")) return;
+  try {
+    await request("/api/cti/" + caseId + "/delete", {});
+    selectedCase = null;
+    snapshot = null;
+    location.hash = "";
+    $("cti-workspace").hidden = true;
+    $("cti-empty").hidden = false;
+    await home();
+  } catch (error) { showError(error); }
+};
 $("cti-expand").onclick = async () => {
   const caseId = selectedCase;
   const button = $("cti-expand");

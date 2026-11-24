@@ -772,6 +772,24 @@ class ThreatIntelligence(unittest.TestCase):
         self.assertIsInstance(assessment["case_confidence"], int)
         self.assertTrue(any(event["source"] == "Parecer" for event in case["events"]))
 
+    def test_case_metadata_archive_and_delete(self):
+        path, case = self.collect("143.198.64.151", tlp="RED")
+        case_id = case["id"]
+        Client.call(path + "/meta", {"notes": "APT infra", "owner": "analyst1", "tags": ["apt", "tracked", ""]}, 201)
+        updated = Client.call(path)
+        self.assertEqual((updated["notes"], updated["owner"], updated["tags"]),
+                         ("APT infra", "analyst1", ["apt", "tracked"]))
+        self.assertFalse(updated["archived"])
+        Client.call(path + "/archive", {"archived": True}, 201)
+        self.assertTrue(Client.call(path)["archived"])
+        self.assertEqual(Client.call("/api/cti")["cases"][0]["archived"], 1)
+        Client.call(path + "/delete", {}, 201)
+        self.assertEqual(Client.call("/api/cti")["cases"], [])
+        with app.database() as conn:
+            remaining = conn.execute("SELECT count(*) FROM cti_relations WHERE case_id=?", (case_id,)).fetchone()[0]
+        self.assertEqual(remaining, 0)
+        Client.call(path, None, 404)
+
     def test_red_case_gets_a_code_generated_assessment(self):
         _, case = self.collect("143.198.64.151", tlp="RED")
         assessment = case.get("assessment")
