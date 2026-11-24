@@ -83,6 +83,62 @@ const englishLabels = new Map(Object.entries({
 const label = (value) => englishLabels.get(value) ?? value;
 const entityLabel = (value, kind) => kind === "Síntese" ? label(value) : value;
 
+// Mirror of policy.py so the form can preview which sources will receive the seeds.
+const SOURCE_CLASSES = {
+  local: ["MISP local", "Histórico local"],
+  catalog: ["MITRE ATT&CK", "MISP Galaxy", "CIRCL OSINT", "ThreatDefence"],
+  web_search: ["Busca web", "GitHub público", "Mwmbl", "Arquivo.pt",
+    "Relatórios históricos na web", "Menções públicas", "Official cybercrime publications"],
+  reputation: ["VirusTotal", "Shodan", "ThreatFox", "Ransomware.live"],
+  llm: ["OpenCode"],
+};
+const sourceClassOf = (source) =>
+  Object.keys(SOURCE_CLASSES).find((cls) => SOURCE_CLASSES[cls].includes(source)) || "web_search";
+
+function permitsSource(source, tlp, passive, overrides) {
+  const override = overrides[source];
+  const cls = sourceClassOf(source);
+  if (cls === "local") return override !== false;
+  if (tlp === "RED") return false;
+  if (passive && cls !== "catalog") return false;
+  if (cls === "catalog") return override !== false;
+  if (tlp === "AMBER") return cls === "reputation" ? override === true : false;
+  return override !== false;
+}
+
+let capabilities = [];
+
+function readOverrides() {
+  const overrides = {};
+  for (const input of $("cti-source-toggles").querySelectorAll("input[data-source]")) {
+    overrides[input.dataset.source] = input.checked;
+  }
+  return overrides;
+}
+
+function refreshSourcePreview() {
+  const tlp = $("cti-tlp").value, passive = $("cti-passive").checked, overrides = readOverrides();
+  const effective = capabilities.filter((source) => permitsSource(source, tlp, passive, overrides));
+  $("cti-source-preview").textContent = effective.length
+    ? "Will query: " + effective.map(label).join(" · ")
+    : "No source will run with these settings.";
+}
+
+function buildSourceToggles() {
+  const tlp = $("cti-tlp").value, passive = $("cti-passive").checked;
+  $("cti-source-toggles").replaceChildren(...capabilities.map((source) => {
+    const row = el("label", undefined, "cti-check");
+    const input = el("input");
+    input.type = "checkbox";
+    input.dataset.source = source;
+    input.checked = permitsSource(source, tlp, passive, {});
+    input.addEventListener("change", refreshSourcePreview);
+    row.append(input, document.createTextNode(" " + label(source)));
+    return row;
+  }));
+  refreshSourcePreview();
+}
+
 function eventMessage(message) {
   return message
     .replace(/^Consulta iniciada\.$/, "Query started.")
@@ -135,6 +191,8 @@ function onSubmit(form, action) {
 async function home() {
   const data = await request("/api/cti");
   session = data.session;
+  capabilities = data.sources;
+  if (!$("cti-source-toggles").childElementCount) buildSourceToggles();
   $("cti-sources").textContent = data.sources.map(label).join(" · ");
   $("cti-imported").textContent = data.imported + " event(s) in the local index.";
   $("cti-cases").replaceChildren(...data.cases.map((item) => {
@@ -456,6 +514,18 @@ function renderIntelligence(data) {
     related.append(item);
   }
   if (!related.children.length) related.append(el("p", "No related cases found."));
+
+  const queries = $("cti-queries");
+  queries.replaceChildren();
+  for (const entry of data.queries || []) {
+    const line = el("p");
+    line.append(el("strong", label(entry.source)),
+      el("span", " · " + entry.result_count + " result(s) · " + new Date(entry.created_at).toLocaleString("en-US")));
+    if (entry.terms && entry.terms.length) line.append(el("small", " · sent: " + entry.terms.join(", ")));
+    queries.append(line);
+  }
+  if (!queries.children.length) queries.append(el("p", "No queries recorded yet."));
+  $("cti-query-count").textContent = (data.queries || []).length ? "(" + data.queries.length + ")" : "";
 }
 
 function latestConclusion(relations) {
@@ -594,9 +664,14 @@ async function openCase(caseId) {
 }
 
 onSubmit($("cti-new"), async (fields) => {
-  const created = await request("/api/cti", fields);
+  const payload = {seeds: fields.seeds, title: fields.title || "", tlp: fields.tlp,
+    passive: $("cti-passive").checked, sources: readOverrides()};
+  const created = await request("/api/cti", payload);
   await openCase(created.id);
 });
+$("cti-tlp").addEventListener("change", buildSourceToggles);
+$("cti-passive").addEventListener("change", buildSourceToggles);
+$("cti-new").addEventListener("reset", () => setTimeout(buildSourceToggles, 0));
 onSubmit($("cti-import"), async () => {
   const file = $("cti-file").files[0];
   if (!file || file.size > 4_500_000) throw new Error("The file must be 4.5 MB or smaller.");

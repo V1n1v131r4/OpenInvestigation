@@ -212,3 +212,11 @@ main { padding: clamp(16px, 3vw, 34px); min-width: 0; }
   border-radius: .07em; background: var(--accent);
 }
 .empty .investigation-mark { justify-self: center; font-size: 2.4rem; }
+
+/* Per-case TLP, passive mode, and source toggles (Stage 3). */
+.cti-check { display: flex; align-items: flex-start; gap: .5em; font-weight: normal; }
+.cti-check input { width: auto; margin-top: .2em; }
+.cti-toggles { display: grid; gap: .25em; margin: .4em 0; }
+#cti-source-options { margin: .3em 0; }
+#cti-source-preview { margin-top: .4em; }
+#cti-queries p { margin: .2em 0; }
