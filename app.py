@@ -37,11 +37,24 @@ def database():
             yield conn
 
 
+LEGACY_TABLES = ("cases", "searches", "results", "events", "reviews")
+
+
 def initialize():
     DB.parent.mkdir(parents=True, exist_ok=True)
     with database() as conn:
         conn.execute("PRAGMA journal_mode=WAL")
         cti.initialize(conn)
+        # Threat-only builds no longer use the legacy tables. Preserve existing data
+        # instead of dropping it, and point the operator at the migration notes.
+        present = [row["name"] for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name IN (%s)"
+            % ",".join("?" * len(LEGACY_TABLES)), LEGACY_TABLES)]
+        if present:
+            print("WARNING: legacy investigation tables found and left untouched: "
+                  + ", ".join(sorted(present))
+                  + ". See README (Migrating from the legacy flow) to export and discard them.",
+                  flush=True)
 
 
 def source_error(error):
