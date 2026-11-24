@@ -23,6 +23,7 @@ const englishLabels = new Map(Object.entries({
   "Parecer do caso": "Case assessment",
   "MISP local": "Local MISP",
   "Histórico local": "Local history",
+  "OpenCode": "OpenCode/LLM",
   "GitHub público": "Public GitHub",
   "Relatórios históricos na web": "Historical web reports",
   "Menções públicas": "Public mentions",
@@ -118,6 +119,10 @@ function readOverrides() {
 
 function refreshSourcePreview() {
   const tlp = $("cti-tlp").value, passive = $("cti-passive").checked, overrides = readOverrides();
+  if (!tlp) {
+    $("cti-source-preview").textContent = "Select a TLP level to choose which sources receive the seeds.";
+    return;
+  }
   const effective = capabilities.filter((source) => permitsSource(source, tlp, passive, overrides));
   $("cti-source-preview").textContent = effective.length
     ? "Will query: " + effective.map(label).join(" · ")
@@ -126,6 +131,11 @@ function refreshSourcePreview() {
 
 function buildSourceToggles() {
   const tlp = $("cti-tlp").value, passive = $("cti-passive").checked;
+  if (!tlp) {
+    $("cti-source-toggles").replaceChildren();
+    refreshSourcePreview();
+    return;
+  }
   $("cti-source-toggles").replaceChildren(...capabilities.map((source) => {
     const row = el("label", undefined, "cti-check");
     const input = el("input");

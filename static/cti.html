@@ -19,10 +19,11 @@
         <label>Case name <small>optional</small><input name="title" maxlength="150"></label>
         <label>IOCs, APT groups, or search terms<textarea name="seeds" required maxlength="7000" rows="5" placeholder="192.0.2.80&#10;example.org&#10;APT28"></textarea></label>
         <p class="muted">Enter one IP address, domain, URL, hash, or term per line. For a User-Agent, prefix it with <code>ua:</code>.</p>
-        <label>Sharing (TLP)
-          <select name="tlp" id="cti-tlp">
+        <label>Sharing (TLP) <small>required</small>
+          <select name="tlp" id="cti-tlp" required>
+            <option value="" selected disabled>Select a TLP level…</option>
             <option value="RED">RED — local data only</option>
-            <option value="AMBER" selected>AMBER — local + catalogs; reputation opt-in; no web search or hosted model</option>
+            <option value="AMBER">AMBER — local + catalogs; reputation opt-in; no web search or hosted model</option>
             <option value="GREEN">GREEN — all enabled sources</option>
             <option value="CLEAR">CLEAR — all enabled sources</option>
           </select>

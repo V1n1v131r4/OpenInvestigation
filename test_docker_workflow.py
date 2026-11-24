@@ -82,7 +82,7 @@ def run():
         server = Server(directory)
         with server:
             assert not server.read("/api/cti")["cases"]
-            created = server.read("/api/cti", {"seeds": REGRESSION_IP})
+            created = server.read("/api/cti", {"seeds": REGRESSION_IP, "tlp": "CLEAR"})
             path = f"/api/cti/{created['id']}"
             case = finished(server, path)
             print(json.dumps({

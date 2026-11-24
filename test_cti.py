@@ -507,6 +507,12 @@ class ThreatIntelligence(unittest.TestCase):
         error = Client.call(path + "/assessment", {}, 400)
         self.assertEqual(error["error"], "Hosted model assessments are not allowed at this case's TLP.")
 
+    def test_case_creation_requires_a_tlp_level(self):
+        error = Client.call("/api/cti", {"seeds": "192.0.2.80"}, 400)
+        self.assertIn("Select a TLP level", error["error"])
+        bad = Client.call("/api/cti", {"seeds": "192.0.2.80", "tlp": "PURPLE"}, 400)
+        self.assertIn("Select a TLP level", bad["error"])
+
     def test_query_log_records_terms_and_counts(self):
         self.enter(patch.object(cti, "configured_sources", return_value=["MISP local", "Histórico local"]))
         _, case = self.collect("143.198.64.151", tlp="CLEAR")

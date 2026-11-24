@@ -386,7 +386,9 @@ class Handler(BaseHTTPRequestHandler):
             if not parts:
                 seeds = cti.parse_seeds(data.get("seeds"))
                 title = field(data, "title", 150, required=False) or seeds[0]["value"][:150]
-                tlp = policy.normalize_tlp(data.get("tlp"))
+                tlp = data.get("tlp")
+                if tlp not in policy.TLP_LEVELS:
+                    raise ValueError("Select a TLP level (CLEAR, GREEN, AMBER, or RED) before starting.")
                 raw_overrides = data.get("sources") if isinstance(data.get("sources"), dict) else {}
                 overrides = {key: bool(value) for key, value in raw_overrides.items() if key in policy.ALL_SOURCES}
                 prefs = {"passive": bool(data.get("passive")), "overrides": overrides}
