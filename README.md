@@ -16,36 +16,6 @@ docker compose up --build -d
 
 Open [http://127.0.0.1:8080](http://127.0.0.1:8080). Use `docker compose logs -f osint` to follow the service and `docker compose down` to stop it. SQLite data lives in the Compose volume. Set `OSINT_PORT` in `.env` to change the HTTP port.
 
-## Migrating from the legacy flow
-
-OpenInvestigation now investigates threats only. The earlier people-and-organization workflow and its `cases`, `searches`, `results`, `events`, and `reviews` tables are gone. If you upgraded an existing database, keep using the same project directory and Compose project name so Docker attaches the existing volume. The application **does not delete** those legacy tables; it logs a startup warning and leaves them in place so you can export and discard them on your own schedule.
-
-Export the legacy tables to the data volume as JSON:
-
-```sh
-docker compose run --rm --no-deps osint python3 - <<'PY'
-import json, sqlite3
-db = sqlite3.connect("/data/cases.sqlite3"); db.row_factory = sqlite3.Row
-tables = ("cases", "searches", "results", "events", "reviews")
-have = {r["name"] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-dump = {t: [dict(r) for r in db.execute(f"SELECT * FROM {t}")] for t in tables if t in have}
-open("/data/legacy-export.json", "w", encoding="utf-8").write(json.dumps(dump, ensure_ascii=False, indent=2))
-print("exported", {t: len(v) for t, v in dump.items()})
-PY
-```
-
-The file is written to `/data/legacy-export.json` inside the `cases` volume; copy it out with `docker compose cp osint:/data/legacy-export.json ./legacy-export.json`. Once you have the export, discard the legacy tables:
-
-```sh
-docker compose run --rm --no-deps osint python3 - <<'PY'
-import sqlite3
-db = sqlite3.connect("/data/cases.sqlite3")
-for t in ("reviews", "events", "results", "searches", "cases"):
-    db.execute(f"DROP TABLE IF EXISTS {t}")
-db.commit(); db.execute("VACUUM")
-print("legacy tables dropped")
-PY
-```
 
 ## Configure API keys
 
