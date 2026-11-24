@@ -1178,17 +1178,49 @@ def assessment_evidence(seed, observations, limit=12):
     return selected
 
 
+INJECTION = re.compile(r"""(?ix)
+      (?:ignore|disregard|forget|override|bypass)\s+(?:all\s+|any\s+|the\s+|your\s+|these\s+|previous\s+|prior\s+|above\s+|earlier\s+)*
+          (?:instruction|instructions|prompt|prompts|context|rule|rules|message|messages|guardrail|guardrails)
+    | (?:^|\n)\s*(?:system|assistant|developer|user)\s*:
+    | </?\s*(?:system|assistant|user|instructions?|prompt)\s*>
+    | \byou\s+are\s+(?:now\s+)?(?:an?\s+|the\s+)?(?:ai|assistant|model|system|chatbot)
+    | \bact\s+as\b
+    | \bnew\s+instructions?\b
+    | \bsystem\s+prompt\b
+""")
+
+
+def sanitize_text(text, limit=420):
+    """Neutralize obvious prompt-injection in source text before it is sent to the model.
+
+    Removes instruction-like patterns and output delimiters and caps the length. Returns the
+    cleaned text and whether anything beyond plain truncation was stripped, so callers can log it.
+    """
+    if not isinstance(text, str):
+        return "", False
+    cleaned = text.replace("```", "'''").replace("~~~", "'''")
+    cleaned = INJECTION.sub("[removed]", cleaned)
+    cleaned = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f  ]", " ", cleaned)
+    changed = cleaned != text
+    return cleaned[:limit], changed
+
+
 def assessment_payload(seeds, observations):
     limit = min(12, max(2, 40 // max(1, len(seeds))))
     payload = []
     next_id = 1
+    sanitized = 0
     for seed in seeds:
         findings = assessment_evidence(seed, observations, limit)
         for item in findings:
             item["id"] = f"E{next_id}"
             next_id += 1
+            title, title_changed = sanitize_text(item.get("titulo", ""), 300)
+            excerpt, excerpt_changed = sanitize_text(item.get("trecho", ""), 420)
+            item["titulo"], item["trecho"] = title, excerpt
+            sanitized += title_changed or excerpt_changed
         payload.append({"termo": seed["value"], "tipo": seed["kind"], "achados": findings})
-    return payload if next_id > 1 else []
+    return (payload if next_id > 1 else []), sanitized
 
 
 class OpenCodeFreeQuota(ProviderError):
