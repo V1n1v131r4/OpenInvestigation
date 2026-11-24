@@ -1489,6 +1489,15 @@ def opencode_failure(result, model):
     return "OpenCode completed without returning assessment text."
 
 
+def claim_supported(texto, excerpts):
+    """A claim is supported only if a cited excerpt shares a significant term with the claim text."""
+    terms = set(re.findall(r"\w{4,}", (texto or "").casefold()))
+    if not terms:
+        return False
+    corpus = " ".join(excerpts).casefold()
+    return any(re.search(r"(?<!\w)" + re.escape(term) + r"(?!\w)", corpus) for term in terms)
+
+
 def assess_with_model(payload, model):
     prompt = (
         "Write the CTI assessment and all narrative fields in English, even when sources use another language. "
@@ -1552,7 +1561,9 @@ def assess_with_model(payload, model):
     if isinstance(justification, str):
         metadata["confidence_reason"] = justification.strip()[:1200]
     allowed_ids = {item["id"] for item in citations}
+    excerpt_by_id = {item["id"]: item.get("trecho", "") for item in citations}
     referenced = set(cited_ids)
+    unsupported = 0
     for field, stances in [("afirmacoes", ("evidencias",)), ("hipoteses", ("favor", "contra", "contexto"))]:
         values = []
         for entry in array(parsed.get(field))[:12]:
@@ -1561,10 +1572,18 @@ def assess_with_model(payload, model):
             links = {stance: list(dict.fromkeys(value for value in array(entry.get(stance))
                                                 if isinstance(value, str) and value in allowed_ids))
                      for stance in stances}
-            if any(links.values()):
-                values.append({"texto": entry["texto"].strip()[:800], **links})
-                referenced.update(value for ids in links.values() for value in ids)
+            if not any(links.values()):
+                continue
+            if field == "afirmacoes" and not claim_supported(
+                    entry["texto"], [excerpt_by_id.get(cid, "") for cid in links["evidencias"]]):
+                # The cited evidence does not mention the claim's terms: drop it and count it.
+                unsupported += 1
+                continue
+            values.append({"texto": entry["texto"].strip()[:800], **links})
+            referenced.update(value for ids in links.values() for value in ids)
         metadata[field] = values
+    if unsupported:
+        metadata["unsupported_claims"] = unsupported
     metadata["citations"] = [item for item in citations if item["id"] in referenced]
     return summary.strip()[:3200], confidence, metadata
 

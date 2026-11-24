@@ -575,6 +575,10 @@ function renderConclusion(current, active, assessment) {
   claims.replaceChildren();
   hypotheses.replaceChildren();
   if (current.afirmacoes?.length) claims.append(el("h3", "Claims and evidence"));
+  if (current.unsupported_claims) {
+    claims.append(el("p", current.unsupported_claims +
+      " claim(s) were discarded because the cited evidence did not mention them.", "muted"));
+  }
   for (const claim of current.afirmacoes || []) {
     const item = el("div", undefined, "cti-analysis-item");
     item.append(el("p", claim.texto));

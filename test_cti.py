@@ -309,6 +309,22 @@ class ThreatIntelligence(unittest.TestCase):
         os.environ["ANTHROPIC_API_KEY"] = ""
         self.assertEqual(cti.assessment_models()[0], "opencode/big-pickle")
 
+    def test_unsupported_claims_are_dropped_and_counted(self):
+        payload = [{"termo": "artex", "tipo": "Termo",
+                    "achados": [{"id": "E1", "titulo": "ARTEX", "fonte": "GitHub público",
+                                 "url": "https://github.com/example/ARTEX", "data": "",
+                                 "trecho": "Public repository describing the ARTEX project."}]}]
+        output = ('{"parecer":"The ARTEX project is public (E1).","confianca":2,'
+                  '"afirmacoes":['
+                  '{"texto":"ARTEX is a public repository.","evidencias":["E1"]},'
+                  '{"texto":"The group bombed a power grid.","evidencias":["E1"]}]}')
+        self.enter(patch.object(cti.subprocess, "run",
+                                return_value=subprocess.CompletedProcess([], 0, output, "")))
+        _, _, metadata = cti.assess_with_model(payload, "opencode/big-pickle")
+        claims = [claim["texto"] for claim in metadata["afirmacoes"]]
+        self.assertEqual(claims, ["ARTEX is a public repository."])  # grounded claim kept
+        self.assertEqual(metadata["unsupported_claims"], 1)          # ungrounded claim dropped and counted
+
     def test_confidence_accepts_zero_and_rejects_out_of_range(self):
         outputs = ['{"parecer":"E1 é insuficiente.","confianca":0}',
                    '{"parecer":"E1 é insuficiente.","confianca":6}']
@@ -326,7 +342,7 @@ class ThreatIntelligence(unittest.TestCase):
         self.enter(patch.object(cti, "configured_sources", return_value=["Histórico local", "OpenCode"]))
         output = ('{"parecer":"E1 documenta a ocorrência.","confianca":3,'
                   '"justificativa":"Há documentação, com cobertura limitada.",'
-                  '"afirmacoes":[{"texto":"Há registro público.","evidencias":["E1","E999"]}],'
+                  '"afirmacoes":[{"texto":"The historical record documents this address.","evidencias":["E1","E999"]}],'
                   '"hipoteses":[{"texto":"Infraestrutura histórica.","favor":["E1"],"contra":[],"contexto":[]}]}')
         self.enter(patch.object(cti.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, output, "")))
         path, original = self.collect(ip)
