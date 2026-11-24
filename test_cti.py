@@ -568,6 +568,27 @@ class ThreatIntelligence(unittest.TestCase):
         self.assertTrue(ioc_rows)
         self.assertTrue(all("decay" in row and "age_days" in row["decay"] for row in ioc_rows))
 
+    def test_entities_resolve_aliases_to_one_canonical_entity(self):
+        import entities
+        attack = [{"type": "intrusion-set", "name": "APT29", "aliases": ["Cozy Bear", "The Dukes"]}]
+        galaxy = [{"value": "Cozy Bear", "meta": {"synonyms": ["Nobelium"]}}]
+        graph = entities.EntityGraph(attack, galaxy)
+        # Different alias names resolve to the same entity when the catalogs link them.
+        self.assertEqual(graph.resolve("The Dukes"), graph.resolve("Nobelium"))
+        entity = graph.resolve("apt29")
+        self.assertEqual(entity["canonical"], "APT29")
+        self.assertIn("Nobelium", entity["aliases"])
+        self.assertTrue(entity["overlaps"])  # linked across ATT&CK and Galaxy
+        self.assertIsNone(graph.resolve("Unknown Group"))
+
+    def test_entities_flag_intra_catalog_conflicts(self):
+        import entities
+        # One catalog gives two differently-named entries the same alias -> ambiguous.
+        galaxy = [{"value": "Group A", "meta": {"synonyms": ["Shared Alias"]}},
+                  {"value": "Group B", "meta": {"synonyms": ["Shared Alias"]}}]
+        graph = entities.EntityGraph(None, galaxy)
+        self.assertTrue(graph.conflicts())
+
     def test_noise_flags_shared_infrastructure_only(self):
         import noise
         self.assertTrue(noise.classify("IP", "8.8.8.8"))
