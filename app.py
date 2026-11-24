@@ -238,12 +238,16 @@ def run_cti(case_id, seeds):
                 observations.extend(mentions)
                 failed += error
     models = cti.assessment_models()
-    if "OpenCode" in sources and models:
-        with database() as conn:
-            case = cti.snapshot(conn, case_id)
-        targets = case["seeds"]
-        payload, sanitized = cti.assessment_payload(targets, assessment_observations(case))
-        if payload:
+    with database() as conn:
+        case = cti.snapshot(conn, case_id)
+    targets = case["seeds"]
+    payload, sanitized = cti.assessment_payload(targets, assessment_observations(case))
+    use_llm = "OpenCode" in sources and bool(models)
+    if payload:
+        graded = [row for row in case["relations"] if row["source"] != "OpenCode" and row["review"] != "rejected"]
+        cti.cluster_evidence(graded)
+        score_result = cti.score(graded)
+        if use_llm:
             if sanitized:
                 with database() as conn:
                     cti.event(conn, case_id, "OpenCode", "warning",
@@ -251,8 +255,14 @@ def run_cti(case_id, seeds):
             _, error = cti_assessment(case_id, targets, payload, models)
             failed += error
         else:
+            # No hosted model (e.g. RED/AMBER or LLM disabled): write the code-generated assessment.
             with database() as conn:
-                cti.event(conn, case_id, "OpenCode", "done", "No linked public evidence to assess.", now())
+                cti.save(conn, case_id, list(cti.code_assessment(targets, payload, score_result)))
+                cti.event(conn, case_id, "Parecer", "done",
+                          f"Code-generated assessment · confidence {score_result['score']}/5.", now())
+    elif use_llm:
+        with database() as conn:
+            cti.event(conn, case_id, "OpenCode", "done", "No linked public evidence to assess.", now())
     with database() as conn:
         total = conn.execute("SELECT count(*) FROM cti_relations WHERE case_id=?", (case_id,)).fetchone()[0]
         status = "partial" if failed else "done" if total else "empty"
