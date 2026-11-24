@@ -36,6 +36,39 @@ TYPES = {"intrusion-set": "Grupo", "malware": "Malware", "tool": "Ferramenta",
 MISP_TYPES = {"ip-src", "ip-dst", "domain", "hostname", "url", "md5", "sha1", "sha256",
               "domain|ip", "ip-dst|port", "ip-src|port", "filename|md5", "filename|sha1", "filename|sha256"}
 
+ADMIRALTY_FILE = Path(__file__).with_name("reliability.json")
+_RELIABILITY = None
+# Admiralty information credibility (1 best … 6 cannot be judged) derived from each evidence's
+# confidence qualifier. A text match confirms the term is present, not that the claim is true.
+CREDIBILITY = {
+    "Verified official publication": 2, "Documented by source": 2,
+    "Atribuição da fonte": 2, "Documentada pela fonte": 2,
+    "Reportado pela fonte": 3, "Catalog entry": 3, "Publicado": 3,
+    "Correspondência textual": 3, "Text match confirmed": 3, "Menção textual verificada": 3,
+    "Tracker profile": 4, "Contexto indireto": 4, "A conferir": 4,
+    "Indexed · needs review": 4, "Indexada · a conferir": 4, "Coocorrência · a conferir": 4,
+    "Unverified claims": 5,
+}
+
+
+def reliability_table():
+    global _RELIABILITY
+    if _RELIABILITY is None:
+        try:
+            data = json.loads(ADMIRALTY_FILE.read_text(encoding="utf-8"))
+            _RELIABILITY = {str(key): str(value).upper()[:1] for key, value in (data.get("sources") or {}).items()}
+        except (OSError, ValueError):
+            _RELIABILITY = {}
+    return _RELIABILITY
+
+
+def admiralty(source, confidence):
+    reliability = reliability_table().get(source, "F")
+    if reliability not in "ABCDEF":
+        reliability = "F"
+    credibility = CREDIBILITY.get(confidence, 6)
+    return {"reliability": reliability, "credibility": credibility, "code": f"{reliability}{credibility}"}
+
 
 def indicator(value):
     value = value.strip()
@@ -596,6 +629,9 @@ def snapshot(conn, case_id):
         case["source_prefs"] = {}
     case["relations"] = [dict(json.loads(item["payload"]), id=item["id"], review=item["review"]) for item in
                          conn.execute("SELECT * FROM cti_relations WHERE case_id=? ORDER BY id", (case_id,))]
+    for row in case["relations"]:
+        if row.get("source") != "OpenCode":
+            row["admiralty"] = admiralty(row.get("source", ""), row.get("confidence", ""))
     case["events"] = [dict(item) for item in conn.execute(
         "SELECT * FROM cti_events WHERE case_id=? ORDER BY id", (case_id,))]
     case["queries"] = [{"source": item["source"], "terms": json.loads(item["terms"]),
@@ -1089,7 +1125,7 @@ def verified_mentions(observations):
         date_match = re.search(r"(?:observed on|observad[oa] em|first seen on)\s+(\d{4}-\d{2}-\d{2})", passage, re.I)
         verified = relation(root, node["kind"], node["value"], "Menção verificada na página", "Verificação web",
                             date=published, reference=final_url, detail=passage or title,
-                            confidence="Menção textual verificada", target_id=node["id"])
+                            confidence="Text match confirmed", target_id=node["id"])
         if published:
             verified["date_kind"] = "Publicação"
         if date_match:

@@ -513,6 +513,33 @@ class ThreatIntelligence(unittest.TestCase):
         bad = Client.call("/api/cti", {"seeds": "192.0.2.80", "tlp": "PURPLE"}, 400)
         self.assertIn("Select a TLP level", bad["error"])
 
+    def test_admiralty_grades_each_evidence_and_defaults_unknown_to_f6(self):
+        self.assertEqual(cti.admiralty("MITRE ATT&CK", "Catalog entry"),
+                         {"reliability": "B", "credibility": 3, "code": "B3"})
+        self.assertEqual(cti.admiralty("Official cybercrime publications", "Verified official publication")["code"], "B2")
+        self.assertEqual(cti.admiralty("Ransomware.live", "Unverified claims"), {"reliability": "C", "credibility": 5, "code": "C5"})
+        # Unknown source and unknown confidence fall back to F/6.
+        self.assertEqual(cti.admiralty("Some unlisted source", "whatever"), {"reliability": "F", "credibility": 6, "code": "F6"})
+        _, case = self.collect("143.198.64.151", tlp="CLEAR")
+        graded = [row for row in case["relations"] if row["source"] != "OpenCode"]
+        self.assertTrue(graded)
+        self.assertTrue(all(row.get("admiralty", {}).get("code") for row in graded))
+
+    def test_verified_mention_uses_text_match_confirmed_qualifier(self):
+        import collectors
+
+        self.enter(patch.object(cti, "configured_sources", return_value=["Busca web"]))
+        self.enter(patch.dict(os.environ, {"OSINT_WEB": "1", "OSINT_SEARCH_URL": "http://search:8080/search"}))
+        url = "https://www.cyfirma.com/research/fixture/"
+        self.enter(patch.object(collectors, "web_search", return_value=[("Report", url, "Query · Campaign Quartz")]))
+        page = cti.public_pages.Page()
+        self.enter(patch.object(cti.public_pages, "secondary_page", return_value=(
+            page, "Report", url, "About Campaign Quartz.", "The report discusses Campaign Quartz in detail.")))
+        _, case = self.collect("Campaign Quartz", tlp="CLEAR")
+        verified = [row for row in case["relations"] if row["relationship"] == "Menção verificada na página"]
+        self.assertTrue(verified)
+        self.assertTrue(all(row["confidence"] == "Text match confirmed" for row in verified))
+
     def test_sanitize_text_flags_injection_but_not_plain_truncation(self):
         clean, changed = cti.sanitize_text("A normal report about Campaign Quartz on 2024-09-27.")
         self.assertFalse(changed)

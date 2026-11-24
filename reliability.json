@@ -1,0 +1,26 @@
+{
+  "version": "2026-11-24",
+  "comment": "Initial Admiralty source-reliability grades (A best … F cannot be judged). Edit per source; unknown sources default to F. Credibility (1-6) is derived in code from each evidence's confidence qualifier.",
+  "sources": {
+    "Official cybercrime publications": "B",
+    "MITRE ATT&CK": "B",
+    "CIRCL OSINT": "B",
+    "MISP local": "B",
+    "MISP Galaxy": "C",
+    "ThreatDefence": "C",
+    "VirusTotal": "C",
+    "Shodan": "C",
+    "ThreatFox": "C",
+    "Ransomware.live": "C",
+    "Histórico local": "C",
+    "Relatórios históricos na web": "C",
+    "Registro manual": "C",
+    "GitHub público": "D",
+    "Busca web": "D",
+    "Busca web pública": "D",
+    "Menções públicas": "D",
+    "Mwmbl": "D",
+    "Arquivo.pt": "D",
+    "Verificação web": "D"
+  }
+}
