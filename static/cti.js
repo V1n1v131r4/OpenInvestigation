@@ -417,6 +417,13 @@ function inspect(node) {
       link.rel = "noopener noreferrer";
       article.append(link);
     }
+    if (relation.snapshot_sha && selectedCase) {
+      const local = el("a", "Open local copy");
+      local.href = "/api/cti/" + selectedCase + "/snapshot/" + relation.snapshot_sha;
+      local.target = "_blank";
+      local.rel = "noopener noreferrer";
+      article.append(local);
+    }
     if (relation.citations?.length) {
       const references = el("details", undefined, "graph-citations");
       references.append(el("summary", "Assessment sources"));

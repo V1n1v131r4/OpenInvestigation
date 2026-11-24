@@ -382,6 +382,13 @@ class Handler(BaseHTTPRequestHandler):
                 imported = conn.execute("SELECT count(*) FROM cti_misp").fetchone()[0]
             return self.send_json({"cases": cases, "sources": cti.configured_sources(),
                                    "imported": imported, "session": SESSION})
+        if parts[:2] == ["api", "cti"] and len(parts) == 5 and parts[3] == "snapshot":
+            with database() as conn:
+                content = cti.snapshot_content(conn, int(parts[2]), parts[4])
+            if content is None:
+                return self.send_json({"error": "Snapshot not found."}, 404)
+            # Served as plain text: it is captured, attacker-controlled page text, never rendered HTML.
+            return self.send_data(200, content.encode(), "text/plain; charset=utf-8")
         if parts[:2] == ["api", "cti"] and len(parts) == 4 and parts[3] == "stix":
             with database() as conn:
                 return self.send_json(cti.stix_bundle(cti.snapshot(conn, int(parts[2]))))
