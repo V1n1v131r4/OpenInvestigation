@@ -65,6 +65,13 @@ VIRUSTOTAL_API_KEY=
 THREATFOX_AUTH_KEY=
 SHODAN_API_KEY=
 RANSOMWARE_LIVE_API_KEY=
+OTX_API_KEY=
+GREYNOISE_API_KEY=
+URLSCAN_API_KEY=
+CENSYS_API_ID=
+CENSYS_API_SECRET=
+CIRCL_PDNS_USER=
+CIRCL_PDNS_PASSWORD=
 ```
 
 Keep your actual keys in the local `.env`. Git ignores this file. After adding or changing keys, recreate the app container so Docker Compose loads them.
