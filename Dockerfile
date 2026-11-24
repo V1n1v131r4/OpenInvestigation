@@ -1,4 +1,4 @@
-FROM node:24-bookworm-slim AS opencode
+FROM node:25-bookworm-slim AS opencode
 RUN npm install -g @opencode/cli
 
 FROM python:3.12-slim-bookworm
