@@ -106,6 +106,24 @@ The default SearXNG configuration excludes DuckDuckGo because of recurring CAPTC
 
 Set `OSINT_WEB=0` to disable external collection. When running outside Compose, set `OSINT_SEARCH_URL` to your SearXNG search endpoint. A bundled CYFIRMA reference provides an offline regression case for `143.198.64.151`. Its publication date does not establish current use of the IP. [Historical report](https://www.cyfirma.com/research/osint-investigation-hunting-malicious-infrastructure-linked-to-transparent-tribe/)
 
+## OPSEC and egress
+
+Each case carries a **TLP** that controls what may leave your machine. You choose it when you start an investigation; there is no default, so the choice is deliberate.
+
+| TLP | Sources that run |
+|---|---|
+| `RED` | Local only — imported MISP events and local history. No external request, no model. |
+| `AMBER` | Local plus public catalogs (ATT&CK, MISP Galaxy, CIRCL, ThreatDefence). No web search, no hosted model. Reputation providers only if you opt in per case. |
+| `GREEN` / `CLEAR` | Every enabled source. |
+
+**Passive mode** (any TLP) restricts a case to local data and catalogs that are downloaded in full and matched locally, so the seed itself is never sent. Per-source toggles let you enable or disable individual sources within what the TLP allows, and the form previews exactly which sources will receive the seeds before you start. A per-case **query log** records what each source was sent and how many results it returned.
+
+Outbound requests are configurable:
+
+- `OSINT_HTTP_PROXY` — route all outbound traffic through an `http://` (recommended) or `https://` proxy. When set it is the only proxy used. SOCKS is not supported (standard-library limitation).
+- `OSINT_USER_AGENT` — override the outbound User-Agent (neutral default).
+- `OSINT_FETCH_ALLOW` / `OSINT_FETCH_DENY` — comma-separated host suffixes that allow or deny which pages the reader may fetch.
+
 ## Investigating cybercrime groups
 
 Enter a group name or alias, for example `LockBit`. MISP Galaxy distinguishes actor records from ransomware families. Official publications add advisories and law-enforcement references. A charging announcement is labeled as an allegation. Ransomware.live totals reflect claims recorded by the tracker and require independent corroboration.
