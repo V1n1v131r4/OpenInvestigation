@@ -525,6 +525,35 @@ class ThreatIntelligence(unittest.TestCase):
         self.assertTrue(graded)
         self.assertTrue(all(row.get("admiralty", {}).get("code") for row in graded))
 
+    def test_simhash_clusters_same_text_and_separates_distinct_pages(self):
+        body = ("Transparent Tribe targeted defense entities using the Mythic framework during a "
+                "2024 campaign against government networks in the region. ") * 4
+        other = ("APT29 deployed a bespoke loader against diplomatic missions across Europe in a "
+                 "separate operation unrelated to the first report described here. ") * 4
+        rows = [
+            cti.relation({"kind": "Grupo", "value": "X"}, "Relatório", "First", "r", "S1", reference="https://a.example/1"),
+            cti.relation({"kind": "Grupo", "value": "X"}, "Relatório", "Mirror", "r", "S2", reference="https://b.example/2"),
+            cti.relation({"kind": "Grupo", "value": "X"}, "Relatório", "Unrelated", "r", "S3", reference="https://c.example/3"),
+        ]
+        rows[0]["publication_simhash"] = cti.simhash("Header one. " + body)
+        rows[1]["publication_simhash"] = cti.simhash("A completely different headline here. " + body)
+        rows[2]["publication_simhash"] = cti.simhash("Header. " + other)
+        count = cti.cluster_evidence(rows)
+        self.assertEqual(rows[0]["cluster_id"], rows[1]["cluster_id"])
+        self.assertNotEqual(rows[0]["cluster_id"], rows[2]["cluster_id"])
+        self.assertEqual(count, 2)
+
+    def test_citation_between_pages_joins_one_cluster(self):
+        rows = [
+            cti.relation({"kind": "Grupo", "value": "X"}, "Relatório", "A", "r", "S1", reference="https://a.example/x"),
+            cti.relation({"kind": "Grupo", "value": "X"}, "Relatório", "B", "r", "S2", reference="https://b.example/y"),
+        ]
+        rows[0]["cited_urls"] = ["https://b.example/y"]
+        rows[0]["publication_simhash"] = cti.simhash("alpha beta gamma delta epsilon zeta")
+        rows[1]["publication_simhash"] = cti.simhash("totally unrelated words appear in this other page")
+        self.assertEqual(cti.cluster_evidence(rows), 1)
+        self.assertEqual(rows[0]["cluster_id"], rows[1]["cluster_id"])
+
     def test_verified_mention_uses_text_match_confirmed_qualifier(self):
         import collectors
 

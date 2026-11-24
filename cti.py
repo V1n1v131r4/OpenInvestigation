@@ -533,6 +533,8 @@ def finish_round(conn, case_id, round_id, timestamp, status):
 
 def case_intelligence(conn, case):
     rows = case["relations"]
+    case["independent_clusters"] = cluster_evidence(
+        [row for row in rows if row["source"] != "OpenCode" and row["review"] != "rejected"])
     current = next((row for row in reversed(rows) if row["source"] == "OpenCode"
                     and row["review"] != "rejected"), None)
     rejected = {row["id"] for row in rows if row["review"] == "rejected"}
@@ -1088,6 +1090,75 @@ def named_pivots(passage):
         yield ("Malware" if match[1].casefold() == "malware" else "Alias"), match[2].strip()
 
 
+def shingles(text, size=3):
+    tokens = re.findall(r"\w+", (text or "").casefold())
+    if len(tokens) < size:
+        return [" ".join(tokens)] if tokens else []
+    return [" ".join(tokens[index:index + size]) for index in range(len(tokens) - size + 1)]
+
+
+def simhash(text, bits=64):
+    """64-bit simhash over word shingles of the normalized text, returned as hex for JSON storage."""
+    vector = [0] * bits
+    for shingle in shingles(text):
+        value = int(hashlib.sha1(shingle.encode(), usedforsecurity=False).hexdigest(), 16)
+        for bit in range(bits):
+            vector[bit] += 1 if (value >> bit) & 1 else -1
+    result = sum(1 << bit for bit in range(bits) if vector[bit] > 0)
+    return format(result, "016x")
+
+
+def hamming(left, right):
+    try:
+        return bin(int(left, 16) ^ int(right, 16)).count("1")
+    except (TypeError, ValueError):
+        return 64
+
+
+def cited_urls(body):
+    found = {clean_url(url.rstrip(".,);]")) for url in re.findall(r'https?://[^\s<>"\')]+', body or "")}
+    found.discard("")
+    return sorted(found)[:20]
+
+
+def cluster_evidence(relations, max_distance=None):
+    """Assign cluster_id to each referenced evidence and return the count of independent clusters.
+
+    Two evidences join the same cluster when they share a reference URL, when one's page cites the
+    other's URL, or when their publication simhashes are within max_distance (near-duplicate text).
+    The number of clusters is the number of independent origins.
+    """
+    if max_distance is None:
+        try:
+            max_distance = int(os.getenv("OSINT_SIMHASH_DISTANCE", "4"))
+        except ValueError:
+            max_distance = 4
+    items = [row for row in relations if row.get("reference")]
+    parent = list(range(len(items)))
+
+    def find(node):
+        while parent[node] != node:
+            parent[node] = parent[parent[node]]
+            node = parent[node]
+        return node
+
+    refs = [clean_url(row.get("reference", "")) for row in items]
+    cites = [set(row.get("cited_urls") or []) for row in items]
+    hashes = [row.get("publication_simhash") for row in items]
+    for i in range(len(items)):
+        for j in range(i + 1, len(items)):
+            same_ref = bool(refs[i]) and refs[i] == refs[j]
+            citation = (refs[j] and refs[j] in cites[i]) or (refs[i] and refs[i] in cites[j])
+            duplicate = hashes[i] and hashes[j] and hamming(hashes[i], hashes[j]) <= max_distance
+            if same_ref or citation or duplicate:
+                parent[find(i)] = find(j)
+    labels = {}
+    for index, row in enumerate(items):
+        root = find(index)
+        row["cluster_id"] = labels.setdefault(root, len(labels) + 1)
+    return len(labels)
+
+
 def verified_mentions(observations):
     from collectors import phrase_match
     inspected = set()
@@ -1132,7 +1203,8 @@ def verified_mentions(observations):
             verified["activity_date"] = date_match[1]
         context = mention_context(title, passage)
         verified["context"] = context
-        verified["publication_fingerprint"] = hashlib.sha256((body or title).encode()).hexdigest()
+        verified["publication_simhash"] = simhash(body or title)
+        verified["cited_urls"] = cited_urls(body)
         yield verified
         for kind, value in list(dict.fromkeys(named_pivots(passage)))[:10]:
             if value.casefold() == original.casefold():
@@ -1184,7 +1256,7 @@ def assessment_evidence(seed, observations, limit=12):
     result.sort(key=lambda row: priorities.get(row["source"], 1))
     groups = {}
     for row in result:
-        fingerprint = row.get("publication_fingerprint")
+        fingerprint = row.get("publication_simhash")
         if fingerprint:
             group = groups.setdefault(fingerprint, set())
             group.add(row["reference"])
@@ -1193,7 +1265,7 @@ def assessment_evidence(seed, observations, limit=12):
     for row in result:
         if row["source"] == "MISP local" or not row["reference"]:
             continue
-        fingerprint = row.get("publication_fingerprint")
+        fingerprint = row.get("publication_simhash")
         key = (fingerprint or row["reference"], row["relationship"], row["target"] if not fingerprint else "")
         if key in unique:
             continue
