@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 import app
 import cti
-from test_investigation import Client
+from test_support import Client
 
 EVENT = {"Event": {
     "uuid": "6f0407dd-e070-4213-a28a-aa8d963d9550",
