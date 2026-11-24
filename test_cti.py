@@ -568,6 +568,18 @@ class ThreatIntelligence(unittest.TestCase):
         self.assertTrue(ioc_rows)
         self.assertTrue(all("decay" in row and "age_days" in row["decay"] for row in ioc_rows))
 
+    def test_noise_flags_shared_infrastructure_only(self):
+        import noise
+        self.assertTrue(noise.classify("IP", "8.8.8.8"))
+        self.assertTrue(noise.classify("Domínio", "d111abcdef.cloudfront.net"))
+        self.assertTrue(noise.classify("URL", "https://foo.herokuapp.com/x"))
+        self.assertFalse(noise.classify("IP", "143.198.64.151"))
+        self.assertFalse(noise.classify("Domínio", "example.org"))
+
+    def test_case_marks_shared_infrastructure_seed(self):
+        _, case = self.collect("8.8.8.8", tlp="RED")
+        self.assertTrue(any(seed.get("shared_infrastructure") for seed in case["seeds"]))
+
     def test_no_silent_result_cuts_remain(self):
         root = Path(__file__).parent
         cti_src = (root / "cti.py").read_text(encoding="utf-8")

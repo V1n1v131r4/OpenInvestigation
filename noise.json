@@ -1,0 +1,45 @@
+{
+  "version": "2026-11-24",
+  "comment": "Shared/noisy infrastructure. Edit locally or override with OSINT_NOISE_FILE. CIDRs cover public DNS resolvers; domains cover common cloud, CDN, and hosting suffixes whose hostnames many unrelated parties share. Keep this conservative so attacker-owned infrastructure is not masked.",
+  "cidrs": [
+    "8.8.8.0/24",
+    "8.8.4.0/24",
+    "1.1.1.0/24",
+    "1.0.0.0/24",
+    "9.9.9.0/24",
+    "149.112.112.0/24",
+    "208.67.222.0/24",
+    "208.67.220.0/24"
+  ],
+  "domains": [
+    "amazonaws.com",
+    "cloudfront.net",
+    "cloudflare.net",
+    "cloudflare-dns.com",
+    "akamai.net",
+    "akamaiedge.net",
+    "akamaihd.net",
+    "fastly.net",
+    "azureedge.net",
+    "windows.net",
+    "googleusercontent.com",
+    "googleapis.com",
+    "gstatic.com",
+    "appspot.com",
+    "github.io",
+    "githubusercontent.com",
+    "herokuapp.com",
+    "netlify.app",
+    "pages.dev",
+    "workers.dev",
+    "sinkhole.io"
+  ],
+  "labels": {
+    "8.8.8.0/24": "Google Public DNS",
+    "8.8.4.0/24": "Google Public DNS",
+    "1.1.1.0/24": "Cloudflare DNS",
+    "9.9.9.0/24": "Quad9 DNS",
+    "208.67.222.0/24": "OpenDNS resolver",
+    "208.67.220.0/24": "OpenDNS resolver"
+  }
+}

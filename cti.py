@@ -20,6 +20,7 @@ from urllib.request import Request, build_opener
 
 from collectors import NoRedirects, download
 import egress
+import noise
 import public_pages
 
 ATTACK = "https://raw.githubusercontent.com/mitre-attack/attack-stix-data/master/enterprise-attack/enterprise-attack.json"
@@ -541,13 +542,26 @@ def finish_round(conn, case_id, round_id, timestamp, status):
 def case_intelligence(conn, case):
     rows = case["relations"]
     graded = [row for row in rows if row["source"] != "OpenCode" and row["review"] != "rejected"]
+    # Mark temporal decay and shared infrastructure before scoring, so a noisy IOC's reduced
+    # credibility is reflected in the code score.
+    for row in rows:
+        if row["source"] == "OpenCode":
+            continue
+        decay = ioc_weight(row.get("origin_kind"), row.get("date")) or ioc_weight(row.get("kind"), row.get("date"))
+        if decay:
+            row["decay"] = decay
+        shared = noise.classify(row.get("origin_kind"), row.get("origin")) or \
+            noise.classify(row.get("kind"), row.get("target"))
+        if shared:
+            row["shared_infrastructure"] = shared
+            if row.get("admiralty"):  # shared infrastructure weakens the evidence
+                row["admiralty"]["credibility"] = max(row["admiralty"]["credibility"], 4)
+    for seed in case["seeds"]:
+        shared = noise.classify(seed.get("kind"), seed.get("value"))
+        if shared:
+            seed["shared_infrastructure"] = shared
     case["independent_clusters"] = cluster_evidence(graded)
     case["score"] = score(graded)
-    for row in rows:
-        if row["source"] != "OpenCode":
-            decay = ioc_weight(row.get("origin_kind"), row.get("date")) or ioc_weight(row.get("kind"), row.get("date"))
-            if decay:
-                row["decay"] = decay
     current = next((row for row in reversed(rows) if row["source"] == "OpenCode"
                     and row["review"] != "rejected"), None)
     rejected = {row["id"] for row in rows if row["review"] == "rejected"}

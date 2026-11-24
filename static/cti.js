@@ -403,6 +403,9 @@ function inspect(node) {
       article.append(el("p", "IOC age " + relation.decay.age_days + " day(s) · weight " +
         relation.decay.weight + (relation.decay.weight < 1 ? " (aged beyond " + relation.decay.period_days + " days)" : ""), "muted"));
     }
+    if (relation.shared_infrastructure) {
+      article.append(el("p", "Shared infrastructure · " + relation.shared_infrastructure + " — weak for attribution", "muted"));
+    }
     if (relation.context) article.append(el("p", "Context · " + label(relation.context), "muted"));
     if (relation.model) article.append(el("p", "Model " + relation.model, "muted"));
     if (relation.activity_date) article.append(el("p", "Activity observed on " + relation.activity_date, "muted"));

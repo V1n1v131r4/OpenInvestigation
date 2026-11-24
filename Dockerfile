@@ -10,7 +10,7 @@ RUN ln -s "$(node -p 'const p = require("/usr/local/lib/node_modules/@opencode/c
 WORKDIR /app
 RUN addgroup --system osint && adduser --system --ingroup osint osint \
     && mkdir /data && chown osint:osint /data
-COPY app.py collectors.py public_pages.py cti.py policy.py egress.py cti_history.json reliability.json ./
+COPY app.py collectors.py public_pages.py cti.py policy.py egress.py noise.py cti_history.json reliability.json noise.json ./
 COPY static ./static
 USER osint
 EXPOSE 8080
