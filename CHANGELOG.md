@@ -30,6 +30,12 @@ semantic versioning once releases are tagged.
 - LLM input sanitization: source excerpts are stripped of obvious prompt-injection patterns and
   output delimiters and capped per excerpt before being sent to the model, and the case logs how
   many excerpts were sanitized.
+- Confidence computed in code: a pure `cti.score` derives the 0–5 confidence from the evidence —
+  0 without evidence, ceiling 2 with a single cluster, ceiling 3 without high-credibility
+  corroboration, 4–5 with two or more independent clusters at credibility 1–2. The model no longer
+  sets the score: it is shown the code score and writes only the prose, and the code score prevails
+  in the UI if the model diverges. A case always carries `score` even when no model runs (so RED and
+  AMBER cases show a confidence and its reasons).
 - Independence clustering: evidence is grouped into independent-origin clusters using a simhash of
   the page text (near-duplicate republications collapse together, configurable via
   `OSINT_SIMHASH_DISTANCE`), shared reference URLs, and citation links (one page citing another's
