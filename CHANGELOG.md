@@ -24,6 +24,9 @@ semantic versioning once releases are tagged.
   under AMBER) and URLhaus, MalwareBazaar, RDAP, crt.sh, and RIPEstat (seed lookups, reputation —
   opt-in under AMBER). RDAP follows registry bootstrap redirects; crt.sh adds certificate-transparency
   subdomains; RIPEstat adds the announcing AS and the AS holder.
+- Optional keyed CTI sources, each opt-in under AMBER and gated by its own key: OTX (`OTX_API_KEY`),
+  GreyNoise (`GREYNOISE_API_KEY`), urlscan (`URLSCAN_API_KEY`), Censys (`CENSYS_API_ID` +
+  `CENSYS_API_SECRET`), and CIRCL pDNS (`CIRCL_PDNS_USER` + `CIRCL_PDNS_PASSWORD`).
 - New seed types with validators: email, CVE, ASN, CIDR, JA3, JARM, crypto wallet (BTC/ETH),
   imphash, ssdeep, filename, and mutex, the ambiguous ones taking a prefix (`ja3:`, `jarm:`,
   `imphash:`, `ssdeep:`, `file:`, `mutex:`). Defanged input (`hxxp`, `[.]`, `(.)`, `[:]`, `[at]`) is

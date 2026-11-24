@@ -762,6 +762,129 @@ def rdap_matches(seeds):
                        confidence="Reportado pela fonte")
 
 
+OTX_PULSE_LIMIT = 8
+URLSCAN_RESULT_LIMIT = 10
+CENSYS_SERVICE_LIMIT = 50
+PDNS_RECORD_LIMIT = 50
+
+
+def otx_matches(seeds, key):
+    sections = {"Domínio": "domain", "Hash": "file", "URL": "url"}
+    for seed in seeds:
+        if seed["kind"] == "IP":
+            if not ipaddress.ip_address(seed["value"]).is_global:
+                continue
+            section = "IPv6" if ":" in seed["value"] else "IPv4"
+        elif seed["kind"] in sections:
+            section = sections[seed["kind"]]
+        else:
+            continue
+        result = provider_json(f"https://otx.alienvault.com/api/v1/indicators/{section}/{quote(seed['value'], safe='')}/general",
+                               {"X-OTX-API-KEY": key}, "OTX")
+        info = result.get("pulse_info") if isinstance(result, dict) else None
+        for pulse in (array(info.get("pulses")) if isinstance(info, dict) else [])[:OTX_PULSE_LIMIT]:
+            if not isinstance(pulse, dict) or not str(pulse.get("name") or "").strip():
+                continue
+            yield relation(seed, "Relatório", str(pulse["name"])[:220], "Listed in OTX pulse", "OTX",
+                           date=str(pulse.get("modified") or "")[:10],
+                           reference="https://otx.alienvault.com/pulse/" + str(pulse.get("id") or ""),
+                           detail=str(pulse.get("description") or "")[:600], confidence="Reportado pela fonte")
+
+
+def greynoise_matches(seeds, key):
+    for seed in seeds:
+        if seed["kind"] != "IP" or not ipaddress.ip_address(seed["value"]).is_global:
+            continue
+        result = provider_json(f"https://api.greynoise.io/v3/community/{quote(seed['value'])}", {"key": key}, "GreyNoise")
+        if not result or result.get("noise") is None:
+            continue
+        label = str(result.get("classification") or "unknown")[:100]
+        yield relation(seed, "Classificação", label, "GreyNoise classification", "GreyNoise",
+                       date=str(result.get("last_seen") or "")[:10],
+                       reference=str(result.get("link") or f"https://viz.greynoise.io/ip/{seed['value']}"),
+                       detail=f"Noise: {result.get('noise')} · RIOT: {result.get('riot')} · {result.get('name', '')}"[:600],
+                       confidence="Reportado pela fonte")
+
+
+def urlscan_matches(seeds, key):
+    fields = {"Domínio": "page.domain", "URL": "page.url"}
+    for seed in seeds:
+        if seed["kind"] == "IP" and ipaddress.ip_address(seed["value"]).is_global:
+            query = "page.ip:" + seed["value"]
+        elif seed["kind"] in fields:
+            query = f'{fields[seed["kind"]]}:"{seed["value"]}"'
+        else:
+            continue
+        result = provider_json("https://urlscan.io/api/v1/search/?q=" + quote(query), {"API-Key": key}, "urlscan")
+        for row in (array(result.get("results")) if isinstance(result, dict) else [])[:URLSCAN_RESULT_LIMIT]:
+            page = row.get("page") if isinstance(row, dict) else None
+            if not isinstance(page, dict) or not clean_url(page.get("url")):
+                continue
+            yield relation(seed, "URL", clean_url(page.get("url"))[:220], "urlscan submission", "urlscan",
+                           date=str((row.get("task") or {}).get("time") or "")[:10],
+                           reference="https://urlscan.io/result/" + str(row.get("_id") or ""),
+                           detail=f"Server: {page.get('server', 'n/a')} · Country: {page.get('country', 'n/a')}"[:600],
+                           confidence="Reportado pela fonte")
+
+
+def censys_matches(seeds, api_id):
+    secret = os.getenv("CENSYS_API_SECRET", "").strip()
+    if not secret:
+        raise ProviderError("Censys: set CENSYS_API_SECRET alongside CENSYS_API_ID.")
+    auth = "Basic " + base64.b64encode(f"{api_id}:{secret}".encode()).decode()
+    for seed in seeds:
+        if seed["kind"] != "IP" or not ipaddress.ip_address(seed["value"]).is_global:
+            continue
+        result = provider_json(f"https://search.censys.io/api/v2/hosts/{quote(seed['value'])}",
+                               {"Authorization": auth}, "Censys")
+        host = result.get("result") if isinstance(result, dict) else None
+        reference = f"https://search.censys.io/hosts/{seed['value']}"
+        for service in (array(host.get("services")) if isinstance(host, dict) else [])[:CENSYS_SERVICE_LIMIT]:
+            if not isinstance(service, dict):
+                continue
+            port, name = service.get("port"), service.get("service_name")
+            if type(port) is not int or not 1 <= port <= 65535:
+                continue
+            yield relation(seed, "Serviço", f"{port}/{name or 'unknown'}", "Service observed by Censys", "Censys",
+                           reference=reference, detail=str(service.get("transport_protocol") or "")[:200],
+                           confidence="Reportado pela fonte")
+
+
+def circl_pdns_matches(seeds, user):
+    password = os.getenv("CIRCL_PDNS_PASSWORD", "").strip()
+    if not password:
+        raise ProviderError("CIRCL pDNS: set CIRCL_PDNS_PASSWORD alongside CIRCL_PDNS_USER.")
+    auth = "Basic " + base64.b64encode(f"{user}:{password}".encode()).decode()
+    for seed in seeds:
+        if seed["kind"] not in ("Domínio", "IP"):
+            continue
+        try:
+            raw = download("https://www.circl.lu/pdns/query/" + quote(seed["value"]),
+                           {"Authorization": auth, "Accept": "application/json"}, limit=8_000_000)
+        except HTTPError as error:
+            if error.code == 404:
+                continue
+            raise ProviderError(f"CIRCL pDNS: HTTP {error.code}.") from None
+        except (URLError, OSError):
+            raise ProviderError("CIRCL pDNS: connection failed.") from None
+        for line in raw.decode("utf-8", "replace").splitlines()[:PDNS_RECORD_LIMIT]:
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(row, dict):
+                continue
+            target = row.get("rdata") if seed["kind"] == "Domínio" else row.get("rrname")
+            typed = indicator(str(target or "").rstrip("."))
+            if not typed:
+                continue
+            last = row.get("time_last")
+            date = datetime.fromtimestamp(last, timezone.utc).date().isoformat() if type(last) is int and last > 0 else ""
+            yield relation(seed, typed[0], typed[1], "Passive DNS record", "CIRCL pDNS", date=date,
+                           reference="https://www.circl.lu/services/passive-dns/",
+                           detail=f"{row.get('rrtype', 'record')}", confidence="Reportado pela fonte")
+
+
 def initialize(conn):
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS cti_cases (
@@ -1100,7 +1223,12 @@ def historical_web_matches(seeds):
 def authenticated_sources():
     return {"ThreatFox": ("THREATFOX_AUTH_KEY", threatfox_matches),
             "VirusTotal": ("VIRUSTOTAL_API_KEY", virustotal_matches),
-            "Shodan": ("SHODAN_API_KEY", shodan_matches)}
+            "Shodan": ("SHODAN_API_KEY", shodan_matches),
+            "OTX": ("OTX_API_KEY", otx_matches),
+            "GreyNoise": ("GREYNOISE_API_KEY", greynoise_matches),
+            "urlscan": ("URLSCAN_API_KEY", urlscan_matches),
+            "Censys": ("CENSYS_API_ID", censys_matches),
+            "CIRCL pDNS": ("CIRCL_PDNS_USER", circl_pdns_matches)}
 
 
 def configured_sources():

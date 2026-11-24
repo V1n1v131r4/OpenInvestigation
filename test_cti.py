@@ -618,6 +618,48 @@ class ThreatIntelligence(unittest.TestCase):
         self.assertEqual((found[0]["source"], found[0]["target"]), ("MalwareBazaar", "Emotet"))
         self.assertTrue(found[0]["reference"].endswith("/sample/" + "a" * 64 + "/"))
 
+    def test_otx_matches_pulses_offline(self):
+        self.enter(patch.object(cti, "provider_json", return_value={
+            "pulse_info": {"pulses": [{"name": "APT Example campaign", "id": "p1", "modified": "2024-08-01",
+                                       "description": "Infra used by the actor."}]}}))
+        found = list(cti.otx_matches(cti.parse_seeds("1.2.3.4"), "test-key"))
+        self.assertEqual((found[0]["source"], found[0]["target"]), ("OTX", "APT Example campaign"))
+
+    def test_greynoise_classifies_ip_offline(self):
+        self.enter(patch.object(cti, "provider_json", return_value={
+            "noise": True, "riot": False, "classification": "malicious", "name": "Scanner",
+            "last_seen": "2024-09-09", "link": "https://viz.greynoise.io/ip/1.2.3.4"}))
+        found = list(cti.greynoise_matches(cti.parse_seeds("1.2.3.4"), "k"))
+        self.assertEqual((found[0]["source"], found[0]["target"]), ("GreyNoise", "malicious"))
+
+    def test_urlscan_matches_domain_offline(self):
+        self.enter(patch.object(cti, "provider_json", return_value={"results": [
+            {"_id": "abc", "page": {"url": "https://evil.example/a", "server": "nginx", "country": "US"},
+             "task": {"time": "2024-07-07T00:00:00Z"}}]}))
+        found = list(cti.urlscan_matches(cti.parse_seeds("evil.example"), "k"))
+        self.assertEqual(found[0]["source"], "urlscan")
+        self.assertTrue(found[0]["reference"].endswith("/result/abc"))
+
+    def test_censys_requires_secret_and_lists_services_offline(self):
+        with patch.dict(os.environ, {"CENSYS_API_SECRET": ""}, clear=False):
+            os.environ.pop("CENSYS_API_SECRET", None)
+            with self.assertRaisesRegex(cti.ProviderError, "CENSYS_API_SECRET"):
+                list(cti.censys_matches(cti.parse_seeds("1.2.3.4"), "id"))
+        self.enter(patch.dict(os.environ, {"CENSYS_API_SECRET": "secret"}))
+        self.enter(patch.object(cti, "provider_json", return_value={"result": {"services": [
+            {"port": 443, "service_name": "HTTPS", "transport_protocol": "TCP"}]}}))
+        found = list(cti.censys_matches(cti.parse_seeds("1.2.3.4"), "id"))
+        self.assertEqual((found[0]["source"], found[0]["target"]), ("Censys", "443/HTTPS"))
+
+    def test_circl_pdns_parses_ndjson_offline(self):
+        self.enter(patch.dict(os.environ, {"CIRCL_PDNS_PASSWORD": "pw"}))
+        ndjson = (b'{"rrname":"evil.example","rrtype":"A","rdata":"1.2.3.4","time_last":1700000000}\n'
+                  b'{"rrname":"evil.example","rrtype":"A","rdata":"not an ip"}\n')
+        self.enter(patch.object(cti, "download", return_value=ndjson))
+        found = list(cti.circl_pdns_matches(cti.parse_seeds("evil.example"), "user"))
+        self.assertEqual((found[0]["source"], found[0]["kind"], found[0]["target"]), ("CIRCL pDNS", "IP", "1.2.3.4"))
+        self.assertEqual(len(found), 1)  # the non-IP rdata line is skipped
+
     def test_crtsh_matches_subdomains_offline(self):
         import json
         certs = json.dumps([

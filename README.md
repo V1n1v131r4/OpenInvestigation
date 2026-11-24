@@ -108,6 +108,11 @@ docker compose up -d osint
 | RDAP | Registration records for an IP, domain, or ASN |
 | crt.sh | Certificate-transparency subdomains for a domain |
 | RIPEstat | Announcing AS for an IP and the AS holder |
+| OTX | AlienVault OTX pulses, with `OTX_API_KEY` |
+| GreyNoise | Internet-scanner classification for an IP, with `GREYNOISE_API_KEY` |
+| urlscan | Submitted scans for a domain, URL, or IP, with `URLSCAN_API_KEY` |
+| Censys | Observed services for an IP, with `CENSYS_API_ID` and `CENSYS_API_SECRET` |
+| CIRCL pDNS | Passive DNS records, with `CIRCL_PDNS_USER` and `CIRCL_PDNS_PASSWORD` |
 
 The default SearXNG configuration excludes DuckDuckGo because of recurring CAPTCHAs. Independent sources continue when a web engine is unavailable. OpenInvestigation checks accessible public HTTPS pages for textual matches and keeps unavailable pages as indexed evidence. An automatic expansion round can look up up to six indicators and two names extracted from verified pages. IOC lookups query passive data providers, and linked detection rules remain references.
 
