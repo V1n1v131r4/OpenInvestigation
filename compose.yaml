@@ -19,12 +19,8 @@ services:
       SHODAN_API_KEY: "${SHODAN_API_KEY:-}"
       RANSOMWARE_LIVE_API_KEY: "${RANSOMWARE_LIVE_API_KEY:-}"
       THREATFOX_AUTH_KEY: "${THREATFOX_AUTH_KEY:-}"
-      OSINT_CORPUS_DIR: /corpus
-      OSINT_FRAMEWORK: /framework
     volumes:
       - cases:/data
-      - ./corpus:/corpus:ro
-      - "${OSINT_FRAMEWORK_DIR:-../OSINT-Agentic-Framework}:/framework:ro"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/api/health', timeout=3)"]
       interval: 15s
