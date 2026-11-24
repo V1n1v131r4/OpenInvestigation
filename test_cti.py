@@ -584,6 +584,40 @@ class ThreatIntelligence(unittest.TestCase):
         self.assertTrue(ioc_rows)
         self.assertTrue(all("decay" in row and "age_days" in row["decay"] for row in ioc_rows))
 
+    def test_cisa_kev_matches_cve_offline(self):
+        import json
+        catalog = json.dumps({"vulnerabilities": [
+            {"cveID": "CVE-2024-12345", "vulnerabilityName": "Example RCE", "vendorProject": "Acme",
+             "product": "Widget", "dateAdded": "2024-05-01", "knownRansomwareCampaignUse": "Known"}]}).encode()
+        self.enter(patch.object(cti, "cached_feed", return_value=catalog))
+        found = list(cti.cisa_kev_matches(cti.parse_seeds("CVE-2024-12345")))
+        self.assertEqual(len(found), 1)
+        self.assertEqual((found[0]["source"], found[0]["date"]), ("CISA KEV", "2024-05-01"))
+        self.assertIn("ransomware", found[0]["detail"].lower())
+
+    def test_feodo_matches_ip_offline(self):
+        import json
+        feed = json.dumps([{"ip_address": "1.2.3.4", "malware": "Dridex", "first_seen": "2024-03-02",
+                            "status": "online", "confidence_level": 100}]).encode()
+        self.enter(patch.object(cti, "cached_feed", return_value=feed))
+        found = list(cti.feodo_matches(cti.parse_seeds("1.2.3.4")))
+        self.assertEqual((found[0]["source"], found[0]["target"]), ("Feodo Tracker", "Dridex"))
+
+    def test_urlhaus_matches_host_offline(self):
+        self.enter(patch.object(cti, "abuse_post", return_value={"query_status": "ok", "urls": [
+            {"url": "https://evil.example/payload", "url_status": "online",
+             "threat": "malware_download", "date_added": "2024-06-01"}]}))
+        found = list(cti.urlhaus_matches(cti.parse_seeds("evil.example")))
+        self.assertEqual(found[0]["source"], "URLhaus")
+        self.assertTrue(found[0]["reference"].startswith("https://evil.example"))
+
+    def test_malwarebazaar_matches_hash_offline(self):
+        self.enter(patch.object(cti, "abuse_post", return_value={"query_status": "ok", "data": [
+            {"sha256_hash": "a" * 64, "signature": "Emotet", "file_type": "exe", "first_seen": "2024-01-10"}]}))
+        found = list(cti.malwarebazaar_matches(cti.parse_seeds("a" * 64)))
+        self.assertEqual((found[0]["source"], found[0]["target"]), ("MalwareBazaar", "Emotet"))
+        self.assertTrue(found[0]["reference"].endswith("/sample/" + "a" * 64 + "/"))
+
     def test_new_indicator_types_are_recognized(self):
         expect = {
             "user@example.com": "Email",

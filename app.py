@@ -129,6 +129,14 @@ def submit_cti_iocs(case_id, seeds, entries, sources):
         tasks.append(COLLECTORS.submit(cti_stage, case_id, "CIRCL OSINT", lambda: cti.circl_matches(seeds), values))
     if "ThreatDefence" in sources and (has_iocs or any(seed["kind"] == "User-Agent" for seed in seeds)):
         tasks.append(COLLECTORS.submit(cti_stage, case_id, "ThreatDefence", lambda: cti.threatdefence_matches(seeds), values))
+    if "CISA KEV" in sources and any(seed["kind"] == "CVE" for seed in seeds):
+        tasks.append(COLLECTORS.submit(cti_stage, case_id, "CISA KEV", lambda: cti.cisa_kev_matches(seeds), values))
+    if "Feodo Tracker" in sources and any(seed["kind"] == "IP" for seed in seeds):
+        tasks.append(COLLECTORS.submit(cti_stage, case_id, "Feodo Tracker", lambda: cti.feodo_matches(seeds), values))
+    if "URLhaus" in sources and any(seed["kind"] in ("IP", "URL", "Domínio") for seed in seeds):
+        tasks.append(COLLECTORS.submit(cti_stage, case_id, "URLhaus", lambda: cti.urlhaus_matches(seeds), values))
+    if "MalwareBazaar" in sources and any(seed["kind"] == "Hash" for seed in seeds):
+        tasks.append(COLLECTORS.submit(cti_stage, case_id, "MalwareBazaar", lambda: cti.malwarebazaar_matches(seeds), values))
     if has_iocs:
         for source, (variable, collector) in cti.authenticated_sources().items():
             if source in sources:

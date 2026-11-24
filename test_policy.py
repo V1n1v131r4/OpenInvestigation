@@ -73,6 +73,15 @@ class Policy(unittest.TestCase):
         self.assertNotIn("Mystery source", policy.effective_sources(["Mystery source"], "AMBER"))
         self.assertIn("Mystery source", policy.effective_sources(["Mystery source"], "CLEAR"))
 
+    def test_new_stage5_sources_are_classified(self):
+        self.assertIn("CISA KEV", policy.CATALOG_SOURCES)
+        self.assertIn("Feodo Tracker", policy.CATALOG_SOURCES)
+        self.assertIn("URLhaus", policy.REPUTATION_SOURCES)
+        self.assertTrue(policy.permits_source("CISA KEV", "AMBER"))          # catalog allowed under AMBER
+        self.assertFalse(policy.permits_source("URLhaus", "AMBER"))          # reputation opt-in only
+        self.assertTrue(policy.permits_source("URLhaus", "AMBER", overrides={"URLhaus": True}))
+        self.assertFalse(policy.permits_source("CISA KEV", "RED"))           # nothing external under RED
+
     def test_normalize_tlp_defaults_to_amber(self):
         self.assertEqual(policy.normalize_tlp("red"), "RED")
         self.assertEqual(policy.normalize_tlp(""), "AMBER")
