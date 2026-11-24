@@ -19,6 +19,7 @@ from urllib.parse import quote, urlencode, urlsplit
 from urllib.request import Request, build_opener
 
 from collectors import NoRedirects, download
+import egress
 import public_pages
 
 ATTACK = "https://raw.githubusercontent.com/mitre-attack/attack-stix-data/master/enterprise-attack/enterprise-attack.json"
@@ -277,9 +278,9 @@ class ProviderError(ValueError):
 
 
 def provider_json(url, headers, source):
-    request = Request(url, headers={"Accept": "application/json", **headers})
+    request = Request(url, headers={"User-Agent": egress.user_agent(), "Accept": "application/json", **headers})
     try:
-        with build_opener(NoRedirects()).open(request, timeout=7) as response:
+        with build_opener(NoRedirects(), *egress.proxy_handlers()).open(request, timeout=7) as response:
             content = response.read(2_000_001)
     except HTTPError as error:
         status = error.code
@@ -394,9 +395,10 @@ def threatfox_matches(seeds, key):
         payload = ({"query": "search_hash", "hash": value} if seed["kind"] == "Hash" else
                    {"query": "search_ioc", "search_term": value, "exact_match": True})
         req = Request(THREATFOX, data=json.dumps(payload).encode(), headers={
-            "Auth-Key": key, "Content-Type": "application/json", "Accept": "application/json",
+            "User-Agent": egress.user_agent(), "Auth-Key": key,
+            "Content-Type": "application/json", "Accept": "application/json",
         })
-        with build_opener(NoRedirects()).open(req, timeout=7) as response:
+        with build_opener(NoRedirects(), *egress.proxy_handlers()).open(req, timeout=7) as response:
             content = response.read(1_000_001)
         if len(content) > 1_000_000:
             raise ValueError("ThreatFox response exceeds the size limit.")
