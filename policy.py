@@ -84,5 +84,5 @@ def effective_sources(available, tlp, passive=False, overrides=None):
 
 
 def permits_hosted_llm(tlp, passive=False, overrides=None):
-    """Whether a hosted-model assessment (OpenCode) may run for the case."""
+    """Whether a hosted-model assessment may run for the case."""
     return permits_source("OpenCode", tlp, passive, overrides)

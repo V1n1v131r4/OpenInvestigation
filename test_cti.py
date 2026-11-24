@@ -1,7 +1,6 @@
 """Passive CTI checks using a temporary database and controlled source responses."""
 import hashlib
 import os
-import subprocess
 import tempfile
 import time
 import unittest
@@ -78,7 +77,7 @@ class ThreatIntelligence(unittest.TestCase):
         import collectors
 
         self.enter(patch.dict(os.environ, {"OSINT_WEB": "1", "OSINT_SEARCH_URL": "http://search:8080/search",
-                                          "OSINT_OPENCODE_MODEL": "opencode/big-pickle"}))
+                                          "OPENAI_API_KEY": "test-key"}))
         self.enter(patch.object(cti.public_pages, "secondary_page", side_effect=OSError("Página indisponível")))
         self.enter(patch.object(cti, "attack_bundle", return_value=[]))
         self.enter(patch.object(cti, "open_index_mentions", return_value=[]))
@@ -88,9 +87,8 @@ class ThreatIntelligence(unittest.TestCase):
             ("ARTEX no GitHub", "https://github.com/example/ARTEX", "Consulta · Repositório público"),
             ("Artexx", "https://example.org/other", "Consulta · Menção a Artexx"),
         ]))
-        runner = self.enter(patch.object(cti.subprocess, "run", return_value=subprocess.CompletedProcess(
-            [], 0, '{"parecer":"Contexto com base em ARTEX no GitHub (E1).","confianca":3}', "",
-        )))
+        runner = self.enter(patch.object(cti, "call_model",
+            return_value='{"parecer":"Contexto com base em ARTEX no GitHub (E1).","confianca":3}'))
         _, case = self.collect("artex")
         self.assertEqual(case["status"], "done")
         self.assertEqual(case["seeds"][0]["kind"], "Termo")
@@ -102,15 +100,14 @@ class ThreatIntelligence(unittest.TestCase):
         self.assertEqual(len(case["relations"]), 2)
         self.assertEqual(rows["Busca web"]["reference"], "https://github.com/example/ARTEX")
         self.assertIn("ARTEX no GitHub", rows["OpenCode"]["detail"])
-        command = runner.call_args.args[0]
-        self.assertIn("opencode/big-pickle", command)
-        self.assertIn("Repositório público", command[-1])
+        self.assertEqual(runner.call_args.args[0], "openai/gpt-5-mini")
+        self.assertIn("Repositório público", runner.call_args.args[1])
 
     def test_keyword_case_keeps_github_mentions_and_open_code_when_searxng_fails(self):
         import collectors
 
         self.enter(patch.dict(os.environ, {"OSINT_WEB": "1", "OSINT_SEARCH_URL": "http://search:8080/search",
-                                          "OSINT_OPENCODE_MODEL": "opencode/big-pickle"}))
+                                          "OPENAI_API_KEY": "test-key"}))
         self.enter(patch.object(cti.public_pages, "secondary_page", side_effect=OSError("Página indisponível")))
         self.enter(patch.object(cti, "attack_bundle", return_value=[]))
         self.enter(patch.object(cti, "open_index_mentions", return_value=[]))
@@ -121,20 +118,19 @@ class ThreatIntelligence(unittest.TestCase):
             {"name": "ARTEX", "full_name": "V1n1v131r4/ARTEX", "private": False,
              "description": "Descrição pública do ARTEX", "html_url": "https://github.com/V1n1v131r4/ARTEX"},
         ]}))
-        runner = self.enter(patch.object(cti.subprocess, "run", return_value=subprocess.CompletedProcess(
-            [], 0, '{"parecer":"O GitHub contém um projeto chamado ARTEX (E1).","confianca":3}',
-        )))
+        runner = self.enter(patch.object(cti, "call_model",
+            return_value='{"parecer":"O GitHub contém um projeto chamado ARTEX (E1).","confianca":3}'))
         _, case = self.collect("artex")
         self.assertEqual(case["status"], "partial")
         self.assertTrue(any(event["source"] == "Busca web" and event["status"] == "error" for event in case["events"]))
         self.assertEqual({row["source"] for row in case["relations"]}, {"GitHub público", "OpenCode"})
         self.assertIn("api.github.com/search/repositories?", github.call_args.args[0])
-        self.assertIn("V1n1v131r4/ARTEX", runner.call_args.args[0][-1])
+        self.assertIn("V1n1v131r4/ARTEX", runner.call_args.args[1])
 
     def test_term_is_verified_and_automatically_expanded_before_assessment(self):
         import collectors
 
-        self.enter(patch.dict(os.environ, {"OSINT_OPENCODE_MODEL": "opencode/big-pickle"}))
+        self.enter(patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}))
         self.enter(patch.object(cti, "configured_sources", return_value=["Busca web", "Histórico local", "OpenCode"]))
         reference = "https://example.org/first-report"
         alias_reference = "https://example.org/follow-up"
@@ -154,12 +150,11 @@ class ThreatIntelligence(unittest.TestCase):
         self.enter(patch.object(cti.public_pages, "secondary_page", side_effect=lambda url, host: (
             page, "Report", url, reports[url], reports[url],
         )))
-        def model(command, **kwargs):
-            self.assertIn("CYFIRMA", command[-1])
-            self.assertIn("Quartz Echo", command[-1])
-            return subprocess.CompletedProcess([], 0,
-                '{"parecer":"Coocorrência em E1.","confianca":3}')
-        self.enter(patch.object(cti.subprocess, "run", side_effect=model))
+        def model(model_name, prompt):
+            self.assertIn("CYFIRMA", prompt)
+            self.assertIn("Quartz Echo", prompt)
+            return '{"parecer":"Coocorrência em E1.","confianca":3}'
+        self.enter(patch.object(cti, "call_model", side_effect=model))
         _, case = self.collect("Campaign Quartz")
         self.assertEqual(case["status"], "done")
         rows = case["relations"]
@@ -177,22 +172,21 @@ class ThreatIntelligence(unittest.TestCase):
     def test_failed_assessment_reports_cause_and_can_retry_without_web_search(self):
         import collectors
 
-        self.enter(patch.dict(os.environ, {"OSINT_OPENCODE_MODEL": "opencode/big-pickle"}))
+        self.enter(patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}))
         self.enter(patch.object(cti, "configured_sources", return_value=["Busca web", "OpenCode"]))
         self.enter(patch.object(cti.public_pages, "secondary_page", side_effect=OSError("Página indisponível")))
         engine = self.enter(patch.object(collectors, "web_search", return_value=[
             ("ARTEX no GitHub", "https://github.com/example/ARTEX", "Consulta · Repositório público"),
         ]))
-        runner = self.enter(patch.object(cti.subprocess, "run", side_effect=[
-            subprocess.CompletedProcess([], 1, "", "HTTP 429 [response internal-token]"),
-            subprocess.CompletedProcess([], 0, '{"parecer":"Contexto em E1.","confianca":3}', ""),
+        runner = self.enter(patch.object(cti, "call_model", side_effect=[
+            cti.ProviderError("OpenAI: rate or quota limit (HTTP 429)."),
+            '{"parecer":"Contexto em E1.","confianca":3}',
         ]))
         path, case = self.collect("artex")
         self.assertEqual(case["status"], "partial")
         failure = next(event for event in case["events"]
                        if event["source"] == "OpenCode" and event["status"] == "error")
-        self.assertIn("limited model usage", failure["message"])
-        self.assertNotIn("internal-token", failure["message"])
+        self.assertIn("HTTP 429", failure["message"])
         searches = engine.call_count
         Client.call(path + "/assessment", {}, 201)
         case = self.wait(path)
@@ -206,19 +200,19 @@ class ThreatIntelligence(unittest.TestCase):
 
         ip = "143.198.64.151"
         file_hash = "a" * 64
-        self.enter(patch.dict(os.environ, {"OSINT_OPENCODE_MODEL": "opencode/big-pickle"}))
+        self.enter(patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}))
         self.enter(patch.object(cti, "configured_sources", return_value=["Histórico local", "OpenCode"]))
 
-        def model(command, **kwargs):
-            payload = json.loads(command[-1].split("\n", 1)[1])
+        def model(model_name, prompt):
+            payload = json.loads(prompt.split("\n", 1)[1])
             entries = {entry["tipo"]: entry for entry in payload}
             self.assertEqual(entries["Hash"]["termo"], file_hash)
             self.assertEqual(entries["Hash"]["achados"], [])
             self.assertEqual(entries["IP"]["termo"], ip)
             self.assertTrue(any(row["fonte"] == "CYFIRMA" for row in entries["IP"]["achados"]))
-            return subprocess.CompletedProcess([], 0, '{"parecer":"E1 documenta o IP. O hash segue sem evidência.","confianca":3}')
+            return '{"parecer":"E1 documenta o IP. O hash segue sem evidência.","confianca":3}'
 
-        runner = self.enter(patch.object(cti.subprocess, "run", side_effect=model))
+        runner = self.enter(patch.object(cti, "call_model", side_effect=model))
         _, case = self.collect(f"{ip}\n{file_hash}")
         self.assertEqual(case["status"], "done")
         runner.assert_called_once()
@@ -230,9 +224,7 @@ class ThreatIntelligence(unittest.TestCase):
     def test_open_indexes_and_models_continue_after_independent_failures(self):
         import collectors
 
-        fallback = "opencode/deepseek-v4.1-flash-free,opencode/beam-free"
-        self.enter(patch.dict(os.environ, {"OSINT_OPENCODE_MODEL": "opencode/big-pickle",
-                                          "OSINT_OPENCODE_FALLBACK_MODELS": fallback}))
+        self.enter(patch.dict(os.environ, {"OPENAI_API_KEY": "test-openai", "ANTHROPIC_API_KEY": "test-anthropic"}))
         self.enter(patch.object(cti, "configured_sources", return_value=[
             "Busca web", "Mwmbl", "Arquivo.pt", "OpenCode",
         ]))
@@ -253,10 +245,10 @@ class ThreatIntelligence(unittest.TestCase):
             }]}
 
         self.enter(patch.object(cti, "provider_json", side_effect=index))
-        runner = self.enter(patch.object(cti.subprocess, "run", side_effect=[
-            subprocess.CompletedProcess([], 1, "", "HTTP 429"),
-            subprocess.CompletedProcess([], 0, '{"parecer":"Resposta sem suporte (E99).","confianca":3}', ""),
-            subprocess.CompletedProcess([], 0, '{"parecer":"Análise das duas fontes (E1, E2).","confianca":3}', ""),
+        # OpenAI returns only a hallucinated citation (rejected); Anthropic produces a grounded one.
+        runner = self.enter(patch.object(cti, "call_model", side_effect=[
+            '{"parecer":"Resposta sem suporte (E99).","confianca":3}',
+            '{"parecer":"Análise das duas fontes (E1, E2).","confianca":3}',
         ]))
         _, case = self.collect("Campaign Quartz")
         self.assertEqual(case["status"], "partial")
@@ -264,50 +256,43 @@ class ThreatIntelligence(unittest.TestCase):
         self.assertEqual(set(rows), {"Mwmbl", "Arquivo.pt", "OpenCode"})
         self.assertEqual(rows["Arquivo.pt"]["date_kind"], "Captura")
         self.assertEqual(rows["Arquivo.pt"]["date"], "2024-09-27")
-        self.assertEqual(rows["OpenCode"]["model"], "opencode/beam-free")
+        self.assertEqual(rows["OpenCode"]["model"], "anthropic/claude-sonnet-4-6")
         self.assertEqual(rows["OpenCode"]["case_confidence"], 3)
         self.assertEqual(len(rows["OpenCode"]["citations"]), 2)
-        args = [call.args[0] for call in runner.call_args_list]
-        self.assertEqual([arg[arg.index("--model") + 1] for arg in args],
-                         ["opencode/big-pickle", *fallback.split(",")])
-        self.assertEqual(len({arg[-1] for arg in args}), 1)
+        self.assertEqual([call.args[0] for call in runner.call_args_list],
+                         ["openai/gpt-5-mini", "anthropic/claude-sonnet-4-6"])
+        self.assertEqual(len({call.args[1] for call in runner.call_args_list}), 1)
         self.assertTrue(any(event["status"] == "warning" and "cite any of the case evidence" in event["message"]
                             for event in case["events"]))
 
-    def test_explicit_free_quota_skips_fallback_in_same_free_tier(self):
-        self.enter(patch.dict(os.environ, {"OSINT_OPENCODE_FALLBACK_MODELS": "opencode/deepseek-v4.1-flash-free"}))
-        result = subprocess.CompletedProcess([], 1, "", "You've used today's free messages. They reset at 8:38 AM.")
-        runner = self.enter(patch.object(cti.subprocess, "run", return_value=result))
-        attempt = lambda *args: None
-        with self.assertRaisesRegex(cti.ProviderError, "free quota is exhausted.*8:38 AM"):
-            list(cti.enrich_case(cti.parse_seeds("artex"), [],
-                                 ["opencode/big-pickle", "opencode/deepseek-v4.1-flash-free"], attempt))
-        runner.assert_called_once()
-
-    def test_assessment_prioritizes_configured_api_keys_and_isolates_credentials(self):
-        config = {"OPENAI_API_KEY": "test-openai", "ANTHROPIC_API_KEY": "test-anthropic",
-                  "OSINT_OPENCODE_MODEL": "opencode/big-pickle",
-                  "OSINT_OPENCODE_FALLBACK_MODELS": "opencode/deepseek-v4.1-flash-free"}
-        self.enter(patch.dict(os.environ, config, clear=True))
+    def test_assessment_prioritizes_providers_and_isolates_credentials(self):
+        self.enter(patch.dict(os.environ, {"OPENAI_API_KEY": "test-openai", "ANTHROPIC_API_KEY": "test-anthropic"},
+                              clear=True))
         models = cti.assessment_models()
-        self.assertEqual(models, ["openai/gpt-5-mini", "anthropic/claude-sonnet-4-6",
-                                  "opencode/big-pickle", "opencode/deepseek-v4.1-flash-free"])
-        runner = self.enter(patch.object(cti.subprocess, "run", side_effect=[
-            subprocess.CompletedProcess([], 1, "", "HTTP 429"),
-            subprocess.CompletedProcess([], 0, '{"parecer":"Análise da evidência E1.","confianca":3}', ""),
-        ]))
+        self.assertEqual(models, ["openai/gpt-5-mini", "anthropic/claude-sonnet-4-6"])
+        calls = []
+
+        def http(url, headers, body, source):
+            calls.append((url, headers))
+            if "openai" in url:
+                raise cti.ProviderError("OpenAI: rate or quota limit (HTTP 429).")
+            return {"content": [{"type": "text", "text": '{"parecer":"Análise da evidência E1.","confianca":3}'}]}
+
+        self.enter(patch.object(cti, "llm_http", side_effect=http))
         rows = list(cti.enrich_case(cti.parse_seeds("artex"), [{"achados": [{"id": "E1"}]}],
                                     models, lambda *args: None))
         self.assertEqual(rows[0]["model"], "anthropic/claude-sonnet-4-6")
-        first, second = (call.kwargs["env"] for call in runner.call_args_list)
-        self.assertEqual(first.get("OPENAI_API_KEY"), "test-openai")
-        self.assertNotIn("ANTHROPIC_API_KEY", first)
-        self.assertEqual(second.get("ANTHROPIC_API_KEY"), "test-anthropic")
-        self.assertNotIn("OPENAI_API_KEY", second)
+        # Each provider request carries only its own credential.
+        openai_headers = next(headers for url, headers in calls if "openai" in url)
+        anthropic_headers = next(headers for url, headers in calls if "anthropic" in url)
+        self.assertEqual(openai_headers.get("Authorization"), "Bearer test-openai")
+        self.assertNotIn("x-api-key", openai_headers)
+        self.assertEqual(anthropic_headers.get("x-api-key"), "test-anthropic")
+        self.assertNotIn("Authorization", anthropic_headers)
         os.environ["OPENAI_API_KEY"] = ""
-        self.assertEqual(cti.assessment_models()[0], "anthropic/claude-sonnet-4-6")
+        self.assertEqual(cti.assessment_models(), ["anthropic/claude-sonnet-4-6"])
         os.environ["ANTHROPIC_API_KEY"] = ""
-        self.assertEqual(cti.assessment_models()[0], "opencode/big-pickle")
+        self.assertEqual(cti.assessment_models(), [])
 
     def test_unsupported_claims_are_dropped_and_counted(self):
         payload = [{"termo": "artex", "tipo": "Termo",
@@ -318,9 +303,8 @@ class ThreatIntelligence(unittest.TestCase):
                   '"afirmacoes":['
                   '{"texto":"ARTEX is a public repository.","evidencias":["E1"]},'
                   '{"texto":"The group bombed a power grid.","evidencias":["E1"]}]}')
-        self.enter(patch.object(cti.subprocess, "run",
-                                return_value=subprocess.CompletedProcess([], 0, output, "")))
-        _, _, metadata = cti.assess_with_model(payload, "opencode/big-pickle")
+        self.enter(patch.object(cti, "call_model", return_value=output))
+        _, _, metadata = cti.assess_with_model(payload, "openai/gpt-5-mini")
         claims = [claim["texto"] for claim in metadata["afirmacoes"]]
         self.assertEqual(claims, ["ARTEX is a public repository."])  # grounded claim kept
         self.assertEqual(metadata["unsupported_claims"], 1)          # ungrounded claim dropped and counted
@@ -331,33 +315,30 @@ class ThreatIntelligence(unittest.TestCase):
         outputs = ['{"parecer":"E1 é insuficiente.","confianca":0}',
                    '{"parecer":"E1 é insuficiente.","confianca":6}',
                    '{"parecer":"E1 é insuficiente.","confianca":"3"}']
-        self.enter(patch.object(cti.subprocess, "run", side_effect=[
-            subprocess.CompletedProcess([], 0, output, "") for output in outputs
-        ]))
+        self.enter(patch.object(cti, "call_model", side_effect=outputs))
         payload = [{"achados": [{"id": "E1"}]}]
-        self.assertEqual(cti.assess_with_model(payload, "opencode/big-pickle")[1], 0)
-        self.assertEqual(cti.assess_with_model(payload, "opencode/big-pickle")[1], 5)
-        self.assertEqual(cti.assess_with_model(payload, "opencode/big-pickle")[1], 3)
+        self.assertEqual(cti.assess_with_model(payload, "openai/gpt-5-mini")[1], 0)
+        self.assertEqual(cti.assess_with_model(payload, "openai/gpt-5-mini")[1], 5)
+        self.assertEqual(cti.assess_with_model(payload, "openai/gpt-5-mini")[1], 3)
 
     def test_assessment_tolerates_a_hallucinated_citation(self):
         # A single non-existent E-ID must not sink an otherwise grounded assessment.
         output = '{"parecer":"The infrastructure is documented (E1) and elsewhere (E9).","confianca":3}'
-        self.enter(patch.object(cti.subprocess, "run",
-                                return_value=subprocess.CompletedProcess([], 0, output, "")))
+        self.enter(patch.object(cti, "call_model", return_value=output))
         summary, confidence, metadata = cti.assess_with_model([{"achados": [{"id": "E1", "trecho": "x"}]}],
-                                                              "opencode/big-pickle")
+                                                              "openai/gpt-5-mini")
         self.assertEqual(confidence, 3)
         self.assertEqual({item["id"] for item in metadata["citations"]}, {"E1"})
 
     def test_audit_rounds_cross_case_and_stix_export(self):
         ip = "143.198.64.151"
-        self.enter(patch.dict(os.environ, {"OSINT_OPENCODE_MODEL": "opencode/big-pickle"}))
+        self.enter(patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}))
         self.enter(patch.object(cti, "configured_sources", return_value=["Histórico local", "OpenCode"]))
         output = ('{"parecer":"E1 documenta a ocorrência.","confianca":3,'
                   '"justificativa":"Há documentação, com cobertura limitada.",'
                   '"afirmacoes":[{"texto":"The historical record documents this address.","evidencias":["E1","E999"]}],'
                   '"hipoteses":[{"texto":"Infraestrutura histórica.","favor":["E1"],"contra":[],"contexto":[]}]}')
-        self.enter(patch.object(cti.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, output, "")))
+        self.enter(patch.object(cti, "call_model", return_value=output))
         path, original = self.collect(ip)
         assessment = original["assessment"]
         evidence_id = assessment["citations"][0]["evidence_id"]
@@ -781,7 +762,7 @@ class ThreatIntelligence(unittest.TestCase):
         self.assertNotIn("[:8]", (root / "collectors.py").read_text(encoding="utf-8"))
 
     def test_llm_failure_falls_back_to_code_assessment(self):
-        self.enter(patch.dict(os.environ, {"OSINT_OPENCODE_MODEL": "opencode/big-pickle"}))
+        self.enter(patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}))
         self.enter(patch.object(cti, "configured_sources", return_value=["Histórico local", "OpenCode"]))
         self.enter(patch.object(cti, "assess_with_model", side_effect=cti.ProviderError("model unavailable")))
         _, case = self.collect("143.198.64.151", tlp="CLEAR")

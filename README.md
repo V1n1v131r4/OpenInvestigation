@@ -4,7 +4,7 @@ OpenInvestigation is a self-hosted threat investigation workspace. It collects a
 
 Docker Compose runs the application and a local SearXNG instance. The application keeps cases, evidence, and imported **MISP event JSON** in a local SQLite volume. The MISP import and correlation workflow is built in and works without a separate MISP server.
 
-**OpenCode runs inside the application container** and invokes the configured model to generate an assessment. With the default free OpenCode models or configured OpenAI and Anthropic keys, inference runs at the hosted provider. SearXNG and the source connectors also make external requests when enabled.
+The application calls a configured model **directly over HTTP** (OpenAI or Anthropic) to write the assessment prose; the confidence score itself is computed in code. Inference runs at the hosted provider you configure. SearXNG and the source connectors also make external requests when enabled. There is no bundled model and no Node runtime in the image.
 
 ## Run locally
 
@@ -60,7 +60,6 @@ Open `.env` in a text editor and fill in only the integrations you want to use. 
 ```dotenv
 OPENAI_API_KEY=
 ANTHROPIC_API_KEY=
-OPENCODE_API_KEY=
 MWMBL_API_KEY=
 VIRUSTOTAL_API_KEY=
 THREATFOX_AUTH_KEY=
@@ -146,13 +145,12 @@ MISP Galaxy and official publications do not require an API token. To enable the
 
 ## Assessment models
 
-After [configuring your API keys](#configure-api-keys), OpenInvestigation tries models in this order:
+After [configuring your API keys](#configure-api-keys), OpenInvestigation calls the providers directly over HTTP, in this order:
 
-1. **GPT-5 Mini** when `OPENAI_API_KEY` is set. Override it with `OSINT_OPENAI_MODEL`.
-2. **Claude Sonnet 4.6** when `ANTHROPIC_API_KEY` is set. Override it with `OSINT_ANTHROPIC_MODEL`.
-3. **OpenCode free models**. Compose defaults to `opencode/big-pickle`, then `opencode/deepseek-v4.1-flash-free`. Use `OSINT_OPENCODE_MODEL` and the comma-separated `OSINT_OPENCODE_FALLBACK_MODELS` to configure this sequence. Set `OPENCODE_API_KEY` if the console requires authentication.
+1. **GPT-5 Mini** (OpenAI) when `OPENAI_API_KEY` is set. Override it with `OSINT_OPENAI_MODEL`.
+2. **Claude Sonnet 4.6** (Anthropic) when `ANTHROPIC_API_KEY` is set. Override it with `OSINT_ANTHROPIC_MODEL`.
 
-Free-model availability and quotas can change. For frequent use, configure your own provider key. Providers can charge for requests and receive the public evidence excerpts used for the assessment. Each fallback uses the same evidence, and a failed assessment preserves the collection for retry. Set `OSINT_LLM=0` to disable assessments. [OpenCode model catalog](https://opencode.ai/docs/console/models/) · [Providers](https://opencode.ai/docs/providers/)
+The model only writes the prose; the confidence score is computed in code and prevails. If a model fails or returns nothing usable, the next one is tried, and if none succeed the case still gets a code-generated assessment. Providers can charge for requests and receive the public evidence excerpts used for the assessment. Set `OSINT_LLM=0` to disable model assessments entirely (the code assessment still runs). [OpenAI API](https://platform.openai.com/docs/api-reference) · [Anthropic API](https://docs.anthropic.com/en/api)
 
 ## Test
 
