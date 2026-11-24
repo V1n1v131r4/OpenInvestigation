@@ -533,8 +533,9 @@ def finish_round(conn, case_id, round_id, timestamp, status):
 
 def case_intelligence(conn, case):
     rows = case["relations"]
-    case["independent_clusters"] = cluster_evidence(
-        [row for row in rows if row["source"] != "OpenCode" and row["review"] != "rejected"])
+    graded = [row for row in rows if row["source"] != "OpenCode" and row["review"] != "rejected"]
+    case["independent_clusters"] = cluster_evidence(graded)
+    case["score"] = score(graded)
     current = next((row for row in reversed(rows) if row["source"] == "OpenCode"
                     and row["review"] != "rejected"), None)
     rejected = {row["id"] for row in rows if row["review"] == "rejected"}
@@ -542,6 +543,10 @@ def case_intelligence(conn, case):
         citations = current.get("citations", [])
         current["stale"] = any(item.get("evidence_id") in rejected for item in citations)
         current["cited_domains"] = len({urlsplit(item["url"]).hostname for item in citations if item.get("url")})
+        # The code score is authoritative; the model number is advisory. The stored case_confidence
+        # (the model's) is kept for run history, but the UI shows case["score"] as the confidence.
+        current["model_confidence"] = current.get("case_confidence")
+        current["code_confidence"] = case["score"]["score"]
     rounds = []
     for record in conn.execute("SELECT * FROM cti_rounds WHERE case_id=? ORDER BY id DESC", (case["id"],)):
         record = dict(record)
@@ -1157,6 +1162,41 @@ def cluster_evidence(relations, max_distance=None):
         root = find(index)
         row["cluster_id"] = labels.setdefault(root, len(labels) + 1)
     return len(labels)
+
+
+def score(evidence):
+    """Pure confidence score (0-5) with explicit reasons, computed in code (never by the model).
+
+    `evidence` is the case's corroborating relations, each carrying a cluster_id (independence) and
+    an Admiralty credibility. Rules: 0 without evidence; ceiling 2 with a single cluster; ceiling 3
+    without high-credibility corroboration; 4 or 5 require two or more independent clusters with
+    credibility 1-2 (5 when the corroboration is confirmed, credibility 1).
+    """
+    items = [row for row in evidence if row.get("cluster_id") and row.get("reference")]
+    if not items:
+        return {"score": 0, "reasons": ["No independent evidence to assess."]}
+    best = {}
+    for row in items:
+        credibility = (row.get("admiralty") or {}).get("credibility", 6)
+        cluster = row["cluster_id"]
+        best[cluster] = min(best.get(cluster, 6), credibility)
+    clusters = len(best)
+    strong = sum(1 for value in best.values() if value <= 2)
+    confirmed = sum(1 for value in best.values() if value <= 1)
+    reasons = [f"{len(items)} evidence item(s) across {clusters} independent cluster(s)."]
+    if clusters == 1:
+        value = 2
+        reasons.append("Single independent cluster: ceiling 2 (no independent corroboration).")
+    elif confirmed >= 2:
+        value = 5
+        reasons.append("Two or more independent clusters with confirmed (credibility 1) evidence.")
+    elif strong >= 2:
+        value = 4
+        reasons.append("Two or more independent clusters with high-credibility (1-2) evidence.")
+    else:
+        value = 3
+        reasons.append("Independent corroboration without high-credibility evidence: ceiling 3.")
+    return {"score": value, "reasons": reasons}
 
 
 def verified_mentions(observations):
