@@ -57,7 +57,7 @@
       <div id="cti-workspace" hidden>
         <div class="case-header">
           <div><h1 id="cti-title"></h1><p id="cti-seeds" class="muted"></p></div>
-          <div class="exports"><button id="cti-expand" type="button" class="primary">Run investigation again</button><button id="cti-assessment" type="button" hidden>Retry assessment</button><button id="cti-export" type="button">Export JSON</button><button id="cti-export-stix" type="button">Export STIX 2.1</button></div>
+          <div class="exports"><button id="cti-expand" type="button" class="primary">Run investigation again</button><button id="cti-assessment" type="button" hidden>Retry assessment</button><button id="cti-export" type="button">Export JSON</button><button id="cti-export-stix" type="button">Export STIX 2.1</button><button id="cti-archive" type="button">Archive</button><button id="cti-delete" type="button">Delete</button></div>
         </div>
         <div class="counts" id="cti-counts" role="status"></div>
         <section class="panel graph-panel">
@@ -107,6 +107,17 @@
         <details class="panel cti-disclosure">
           <summary>Related cases</summary>
           <div class="panel-body" id="cti-related"></div>
+        </details>
+        <details class="panel cti-disclosure">
+          <summary>Case details</summary>
+          <div class="panel-body">
+            <form id="cti-meta">
+              <label>Owner<input name="owner" maxlength="100"></label>
+              <label>Tags <small>comma-separated</small><input name="tags" maxlength="600"></label>
+              <label>Notes<textarea name="notes" maxlength="5000" rows="3"></textarea></label>
+              <button>Save details</button>
+            </form>
+          </div>
         </details>
         <details class="panel cti-disclosure">
           <summary>Query log <span id="cti-query-count" class="muted"></span></summary>

@@ -772,6 +772,45 @@ class ThreatIntelligence(unittest.TestCase):
         self.assertIsInstance(assessment["case_confidence"], int)
         self.assertTrue(any(event["source"] == "Parecer" for event in case["events"]))
 
+    def test_verified_page_is_snapshotted_and_served_locally(self):
+        import collectors
+
+        self.enter(patch.object(cti, "configured_sources", return_value=["Busca web"]))
+        self.enter(patch.dict(os.environ, {"OSINT_WEB": "1", "OSINT_SEARCH_URL": "http://search:8080/search"}))
+        url = "https://www.cyfirma.com/research/fixture/"
+        self.enter(patch.object(collectors, "web_search", return_value=[("Report", url, "Query · Campaign Quartz")]))
+        page = cti.public_pages.Page()
+        body = "Full captured text about Campaign Quartz and its infrastructure."
+        self.enter(patch.object(cti.public_pages, "secondary_page",
+                                return_value=(page, "Report", url, "About Campaign Quartz.", body)))
+        path, case = self.collect("Campaign Quartz", tlp="CLEAR")
+        self.assertTrue(case["snapshots"])
+        snap = case["snapshots"][0]
+        self.assertEqual(snap["url"], url)
+        verified = next(row for row in case["relations"] if row["relationship"] == "Menção verificada na página")
+        self.assertEqual(verified["snapshot_sha"], snap["sha256"])
+        served = Client.call(path + "/snapshot/" + snap["sha256"])
+        self.assertIn("Campaign Quartz and its infrastructure", served)
+        self.assertEqual(Client.call(path + "/snapshot/" + "0" * 64, None, 404)["error"], "Snapshot not found.")
+
+    def test_case_metadata_archive_and_delete(self):
+        path, case = self.collect("143.198.64.151", tlp="RED")
+        case_id = case["id"]
+        Client.call(path + "/meta", {"notes": "APT infra", "owner": "analyst1", "tags": ["apt", "tracked", ""]}, 201)
+        updated = Client.call(path)
+        self.assertEqual((updated["notes"], updated["owner"], updated["tags"]),
+                         ("APT infra", "analyst1", ["apt", "tracked"]))
+        self.assertFalse(updated["archived"])
+        Client.call(path + "/archive", {"archived": True}, 201)
+        self.assertTrue(Client.call(path)["archived"])
+        self.assertEqual(Client.call("/api/cti")["cases"][0]["archived"], 1)
+        Client.call(path + "/delete", {}, 201)
+        self.assertEqual(Client.call("/api/cti")["cases"], [])
+        with app.database() as conn:
+            remaining = conn.execute("SELECT count(*) FROM cti_relations WHERE case_id=?", (case_id,)).fetchone()[0]
+        self.assertEqual(remaining, 0)
+        Client.call(path, None, 404)
+
     def test_red_case_gets_a_code_generated_assessment(self):
         _, case = self.collect("143.198.64.151", tlp="RED")
         assessment = case.get("assessment")

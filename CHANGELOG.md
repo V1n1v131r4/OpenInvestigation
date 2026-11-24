@@ -29,6 +29,12 @@ semantic versioning once releases are tagged.
 
 ### Added
 
+- Case management: per-case notes, tags, and owner; archive/unarchive; delete (with a UI
+  confirmation) that also removes the case's evidence, events, rounds, and queries; and the existing
+  JSON export. (Full case import and evidence pagination remain backlog.)
+- Evidence snapshots: when a web mention is verified, the page text is stored compressed with its
+  SHA-256 and collection time, and the evidence panel links to the local copy (served as plain text).
+  (Wayback Save Page Now remains backlog.)
 - New no-key CTI sources, each with a size limit, timeout, typed errors, and a fixture test, slotted
   into the TLP policy: CISA KEV and Feodo Tracker (downloaded catalogs matched locally, so they run
   under AMBER) and URLhaus, MalwareBazaar, RDAP, crt.sh, and RIPEstat (seed lookups, reputation —

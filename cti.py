@@ -9,6 +9,7 @@ import os
 import re
 import time
 import uuid
+import zlib
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
@@ -913,6 +914,11 @@ def initialize(conn):
             id INTEGER PRIMARY KEY, case_id INTEGER NOT NULL REFERENCES cti_cases(id),
             source TEXT NOT NULL, terms TEXT NOT NULL, result_count INTEGER NOT NULL, created_at TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS cti_snapshots (
+            case_id INTEGER NOT NULL REFERENCES cti_cases(id), sha256 TEXT NOT NULL, url TEXT NOT NULL,
+            content BLOB NOT NULL, bytes INTEGER NOT NULL, collected_at TEXT NOT NULL,
+            PRIMARY KEY(case_id, sha256)
+        );
         CREATE INDEX IF NOT EXISTS cti_relations_case ON cti_relations(case_id, id);
         CREATE INDEX IF NOT EXISTS cti_entity_relation ON cti_entity_index(relation_id);
         CREATE INDEX IF NOT EXISTS cti_queries_case ON cti_queries(case_id, id);
@@ -926,6 +932,10 @@ def initialize(conn):
         conn.execute("UPDATE cti_cases SET tlp='CLEAR'")
     if "source_prefs" not in case_columns:
         conn.execute("ALTER TABLE cti_cases ADD COLUMN source_prefs TEXT NOT NULL DEFAULT '{}'")
+    for column, kind, default in (("notes", "TEXT", "''"), ("tags", "TEXT", "'[]'"),
+                                  ("owner", "TEXT", "''"), ("archived", "INTEGER", "0")):
+        if column not in case_columns:
+            conn.execute(f"ALTER TABLE cti_cases ADD COLUMN {column} {kind} NOT NULL DEFAULT {default}")
     conn.execute("UPDATE cti_cases SET status='interrupted' WHERE status IN ('running','queued')")
 
     conn.execute("UPDATE cti_rounds SET status='interrupted' WHERE status='running'")
@@ -1078,6 +1088,11 @@ def snapshot(conn, case_id):
         case["source_prefs"] = json.loads(case.get("source_prefs") or "{}")
     except ValueError:
         case["source_prefs"] = {}
+    try:
+        case["tags"] = json.loads(case.get("tags") or "[]")
+    except ValueError:
+        case["tags"] = []
+    case["archived"] = bool(case.get("archived"))
     case["relations"] = [dict(json.loads(item["payload"]), id=item["id"], review=item["review"]) for item in
                          conn.execute("SELECT * FROM cti_relations WHERE case_id=? ORDER BY id", (case_id,))]
     for row in case["relations"]:
@@ -1089,7 +1104,15 @@ def snapshot(conn, case_id):
                         "result_count": item["result_count"], "created_at": item["created_at"]}
                        for item in conn.execute(
                            "SELECT * FROM cti_queries WHERE case_id=? ORDER BY id", (case_id,))]
+    case["snapshots"] = [dict(item) for item in conn.execute(
+        "SELECT sha256,url,bytes,collected_at FROM cti_snapshots WHERE case_id=? ORDER BY collected_at", (case_id,))]
     return case
+
+
+def snapshot_content(conn, case_id, sha256):
+    row = conn.execute("SELECT content FROM cti_snapshots WHERE case_id=? AND sha256=?",
+                       (case_id, sha256)).fetchone()
+    return zlib.decompress(row["content"]).decode("utf-8", "replace") if row else None
 
 
 def event(conn, case_id, source, status, message, timestamp, *, found=None):
@@ -1104,9 +1127,25 @@ def log_query(conn, case_id, source, terms, result_count, timestamp):
                  (case_id, source, json.dumps(list(terms), ensure_ascii=False), int(result_count), timestamp))
 
 
-def save(conn, case_id, rows):
+SNAPSHOT_LIMIT = 1_500_000  # bytes of page text stored per snapshot
+
+
+def store_snapshot(conn, case_id, url, content, timestamp):
+    """Store a compressed copy of a verified page's text with its SHA-256; returns the hash."""
+    data = (content or "").encode("utf-8", "replace")[:SNAPSHOT_LIMIT]
+    digest = hashlib.sha256(data).hexdigest()
+    conn.execute("INSERT OR IGNORE INTO cti_snapshots (case_id,sha256,url,content,bytes,collected_at) "
+                 "VALUES (?,?,?,?,?,?)", (case_id, digest, url, zlib.compress(data), len(data), timestamp))
+    return digest
+
+
+def save(conn, case_id, rows, timestamp=""):
     inserted = 0
     for row in rows:
+        snapshot = row.pop("snapshot", None)
+        if snapshot and snapshot.get("content"):
+            row["snapshot_sha"] = store_snapshot(conn, case_id, snapshot.get("url") or row.get("reference", ""),
+                                                 snapshot["content"], timestamp or datetime.now(timezone.utc).isoformat(timespec="seconds"))
         cursor = conn.execute("INSERT OR IGNORE INTO cti_relations (case_id,payload) VALUES (?,?)",
                               (case_id, json.dumps(row, ensure_ascii=False, sort_keys=True)))
         if cursor.rowcount:
@@ -1719,6 +1758,8 @@ def verified_mentions(observations):
         verified["context"] = context
         verified["publication_simhash"] = simhash(body or title)
         verified["cited_urls"] = cited_urls(body)
+        if body:  # keep a local copy of the verified page text (save() stores it compressed)
+            verified["snapshot"] = {"url": final_url, "content": body}
         yield verified
         for kind, value in list(dict.fromkeys(named_pivots(passage)))[:10]:
             if value.casefold() == original.casefold():
