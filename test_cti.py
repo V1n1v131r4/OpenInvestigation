@@ -568,6 +568,14 @@ class ThreatIntelligence(unittest.TestCase):
         self.assertTrue(ioc_rows)
         self.assertTrue(all("decay" in row and "age_days" in row["decay"] for row in ioc_rows))
 
+    def test_no_silent_result_cuts_remain(self):
+        root = Path(__file__).parent
+        cti_src = (root / "cti.py").read_text(encoding="utf-8")
+        for literal in ("[:8]", "[:20]", "[:25]", "[:80]"):
+            self.assertNotIn(literal, cti_src, f"silent cut {literal} remains in cti.py")
+        self.assertNotIn("== 1200", (root / "app.py").read_text(encoding="utf-8"))
+        self.assertNotIn("[:8]", (root / "collectors.py").read_text(encoding="utf-8"))
+
     def test_red_case_gets_a_code_generated_assessment(self):
         _, case = self.collect("143.198.64.151", tlp="RED")
         assessment = case.get("assessment")

@@ -489,7 +489,9 @@ function renderIntelligence(data) {
     panel.append(el("summary", round.started_at + " · " + round.new_evidence.length + " new evidence item(s)"));
     const outcomes = el("ul");
     for (const item of round.coverage) {
-      const status = {running: "Running", error: "Unavailable", done: item.found === 0 ? "No findings" : "Queried"};
+      const partial = /Truncated at \d+ \(partial\)/.test(item.message || "");
+      const status = {running: "Running", error: "Unavailable",
+        done: partial ? "Partial" : item.found === 0 ? "No findings" : "Queried"};
       outcomes.append(el("li", label(item.source) + " · " + (status[item.status] || item.status) + " · " + eventMessage(item.message)));
     }
     panel.append(outcomes);

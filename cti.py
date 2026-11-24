@@ -36,6 +36,13 @@ TYPES = {"intrusion-set": "Grupo", "malware": "Malware", "tool": "Ferramenta",
 MISP_TYPES = {"ip-src", "ip-dst", "domain", "hostname", "url", "md5", "sha1", "sha256",
               "domain|ip", "ip-dst|port", "ip-src|port", "filename|md5", "filename|sha1", "filename|sha256"}
 
+# Named collection limits. A cut is recorded in the coverage event, never applied silently.
+SEED_SCAN_LIMIT = 8            # seeds or terms examined per source in one round
+EVENT_COOCCURRENCE_LIMIT = 20  # co-occurrence attributes emitted per MISP event
+ATTACK_REFERENCE_LIMIT = 25    # external references read per ATT&CK object
+ATTACK_EDGE_LIMIT = 80         # relationship edges read per ATT&CK object
+CITED_URL_LIMIT = 20           # URLs captured from a verified page body
+
 ADMIRALTY_FILE = Path(__file__).with_name("reliability.json")
 _RELIABILITY = None
 # Admiralty information credibility (1 best … 6 cannot be judged) derived from each evidence's
@@ -183,7 +190,7 @@ def misp_matches(seeds, events, source="MISP local"):
                            date=item.get("first_seen") or event["date"], detail=detail, reference=reference,
                            target_id=event["id"])
             event_seed = {"kind": "Evento", "value": event["title"], "id": event["id"]}
-            for other in (*event["actors"], *event["iocs"][:20]):
+            for other in (*event["actors"], *event["iocs"][:EVENT_COOCCURRENCE_LIMIT]):
                 yield relation(event_seed, other["kind"], other["value"], "Coocorrência no evento", source,
                                date=other.get("first_seen") or event["date"], detail=detail, reference=reference,
                                confidence="Contexto indireto")
@@ -290,11 +297,11 @@ def attack_matches(seeds, objects):
             yield relation(seed, kind, name, "Identificado no catálogo", "MITRE ATT&CK", date=date,
                            reference=primary.get("url", ""), detail=" · ".join(filter(None, [primary.get("external_id", ""), *array(item.get("aliases"))]))[:500])
             canonical = {"kind": kind, "value": name}
-            for ref in refs[:25]:
+            for ref in refs[:ATTACK_REFERENCE_LIMIT]:
                 if ref is not primary and clean_url(ref.get("url")):
                     yield relation(canonical, "Relatório", str(ref.get("description") or ref["source_name"])[:220],
                                    "Referência citada", "MITRE ATT&CK", reference=ref["url"])
-            for edge in [edge for edge in edges if source_id in (edge.get("source_ref"), edge.get("target_ref"))][:80]:
+            for edge in [edge for edge in edges if source_id in (edge.get("source_ref"), edge.get("target_ref"))][:ATTACK_EDGE_LIMIT]:
                 opposite = edge.get("target_ref") if edge.get("source_ref") == source_id else edge.get("source_ref")
                 if opposite not in known:
                     continue
@@ -741,7 +748,7 @@ def historical_web_matches(seeds):
                 and (seed["kind"] != "IP" or ipaddress.ip_address(seed["value"]).is_global)
                 and (seed["kind"] != "Domínio" or not seed["value"].endswith((".local", ".internal", ".localhost")))]
     failed = None
-    for seed in eligible[:8]:
+    for seed in eligible[:SEED_SCAN_LIMIT]:
         exact = seed["value"]
         alternatives = f'"{exact}"'
         if seed["kind"] == "IP" and "." in exact:
@@ -822,7 +829,7 @@ def keyword_matches(terms):
               " (site:reddit.com OR site:news.ycombinator.com OR site:bleepingcomputer.com)",
               " (site:securelist.com OR site:unit42.paloaltonetworks.com OR site:welivesecurity.com)")
     failures = []
-    for seed in terms[:8]:
+    for seed in terms[:SEED_SCAN_LIMIT]:
         phrase = " ".join(seed["value"].replace('"', " ").split())
         if not phrase:
             continue
@@ -851,7 +858,7 @@ def keyword_matches(terms):
 
 def github_mentions(terms):
     from collectors import clean, phrase_match
-    for seed in terms[:8]:
+    for seed in terms[:SEED_SCAN_LIMIT]:
         phrase = " ".join(seed["value"].replace('"', " ").split())
         if not phrase:
             continue
@@ -917,7 +924,7 @@ def official_cybercrime_mentions(terms):
     from collectors import phrase_match, web_search
 
     scope = " OR ".join("site:" + domain for domain in OFFICIAL_CYBERCRIME)
-    for seed in terms[:8]:
+    for seed in terms[:SEED_SCAN_LIMIT]:
         phrase = " ".join(seed["value"].replace('"', " ").split())
         if not phrase:
             continue
@@ -968,7 +975,7 @@ def ransomware_live_matches(terms, key):
         raise ProviderError("Ransomware.live returned an unexpected group list.")
     names = {row["group"].strip().casefold(): row for row in catalog["groups"] if isinstance(row, dict)
              and isinstance(row.get("group"), str) and row["group"].strip()}
-    for seed in terms[:8]:
+    for seed in terms[:SEED_SCAN_LIMIT]:
         profile = names.get(seed["value"].strip().casefold())
         if not profile:
             continue
@@ -1001,7 +1008,7 @@ def open_index_mentions(terms, source):
 
     global MWMBL_NEXT
     is_archive = source == "Arquivo.pt"
-    for seed in terms[:8]:
+    for seed in terms[:SEED_SCAN_LIMIT]:
         phrase = seed["value"]
         if is_archive:
             query = urlencode({"q": phrase, "maxItems": 12})
@@ -1128,7 +1135,7 @@ def hamming(left, right):
 def cited_urls(body):
     found = {clean_url(url.rstrip(".,);]")) for url in re.findall(r'https?://[^\s<>"\')]+', body or "")}
     found.discard("")
-    return sorted(found)[:20]
+    return sorted(found)[:CITED_URL_LIMIT]
 
 
 def cluster_evidence(relations, max_distance=None):
@@ -1561,7 +1568,7 @@ def compose_parecer(payload, score_result):
         if not findings:
             parts.append(f"{entry['termo']} ({entry['tipo']}): no linked public evidence.")
             continue
-        ids = ", ".join(item["id"] for item in findings[:8])
+        ids = ", ".join(item["id"] for item in findings[:SEED_SCAN_LIMIT])
         parts.append(f"{entry['termo']} ({entry['tipo']}): {len(findings)} evidence item(s) [{ids}].")
     aged = sum(1 for entry in payload if entry.get("tipo") in ("IP", "Domínio")
                for item in (entry.get("achados") or [])
