@@ -25,7 +25,7 @@ WEB_SEARCH_SOURCES = frozenset({
     "Relatórios históricos na web", "Menções públicas", "Official cybercrime publications",
 })
 REPUTATION_SOURCES = frozenset({"VirusTotal", "Shodan", "ThreatFox", "Ransomware.live",
-                                "URLhaus", "MalwareBazaar"})
+                                "URLhaus", "MalwareBazaar", "RDAP", "crt.sh", "RIPEstat"})
 LLM_SOURCES = frozenset({"OpenCode"})
 ALL_SOURCES = LOCAL_SOURCES | CATALOG_SOURCES | WEB_SEARCH_SOURCES | REPUTATION_SOURCES | LLM_SOURCES
 
