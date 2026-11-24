@@ -525,6 +525,119 @@ def threatfox_matches(seeds, key):
                                date=observation, reference=ref, detail=f"Confidence reported by the source: {confidence or 'not provided'}")
 
 
+CISA_KEV = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
+FEODO = "https://feodotracker.abuse.ch/downloads/ipblocklist.json"
+URLHAUS_HOST = "https://urlhaus-api.abuse.ch/v1/host/"
+MALWAREBAZAAR = "https://mb-api.abuse.ch/api/v1/"
+
+
+def abuse_post(url, fields, source, key=None):
+    headers = {"User-Agent": egress.user_agent(), "Accept": "application/json",
+               "Content-Type": "application/x-www-form-urlencoded"}
+    if key:
+        headers["Auth-Key"] = key
+    request = Request(url, data=urlencode(fields).encode(), headers=headers)
+    try:
+        with build_opener(NoRedirects(), *egress.proxy_handlers()).open(request, timeout=7) as response:
+            content = response.read(3_000_001)
+    except HTTPError as error:
+        status = error.code
+        error.close()
+        raise ProviderError(f"{source}: HTTP {status}.") from None
+    except (URLError, OSError):
+        raise ProviderError(f"{source}: connection failed.") from None
+    if len(content) > 3_000_000:
+        raise ProviderError(f"{source}: response exceeds the size limit.")
+    try:
+        result = json.loads(content)
+    except ValueError:
+        raise ProviderError(f"{source}: invalid JSON response.") from None
+    return result if isinstance(result, dict) else None
+
+
+def cisa_kev_matches(seeds):
+    wanted = {seed["value"].upper(): seed for seed in seeds if seed["kind"] == "CVE"}
+    if not wanted:
+        return
+    data = json.loads(cached_feed(CISA_KEV, 32_000_000))
+    for row in array(data.get("vulnerabilities")) if isinstance(data, dict) else []:
+        if not isinstance(row, dict):
+            continue
+        seed = wanted.get(str(row.get("cveID") or "").upper())
+        if not seed:
+            continue
+        ransomware = str(row.get("knownRansomwareCampaignUse") or "").strip().lower() == "known"
+        detail = " · ".join(filter(None, [str(row.get("vendorProject") or ""), str(row.get("product") or ""),
+                                          "Known ransomware campaign use" if ransomware else ""]))[:600]
+        yield relation(seed, "Exploração conhecida", str(row.get("vulnerabilityName") or seed["value"])[:220],
+                       "Listed in CISA KEV", "CISA KEV", date=str(row.get("dateAdded") or "")[:10],
+                       reference="https://www.cisa.gov/known-exploited-vulnerabilities-catalog",
+                       detail=detail, confidence="Documentada pela fonte")
+
+
+def feodo_matches(seeds):
+    wanted = {seed["value"]: seed for seed in seeds
+              if seed["kind"] == "IP" and ipaddress.ip_address(seed["value"]).is_global}
+    if not wanted:
+        return
+    data = json.loads(cached_feed(FEODO, 8_000_000))
+    for row in data if isinstance(data, list) else []:
+        if not isinstance(row, dict):
+            continue
+        seed = wanted.get(str(row.get("ip_address") or ""))
+        if not seed:
+            continue
+        yield relation(seed, "Malware", str(row.get("malware") or "botnet")[:200],
+                       "Listed by Feodo Tracker", "Feodo Tracker", date=str(row.get("first_seen") or "")[:10],
+                       reference="https://feodotracker.abuse.ch/browse/",
+                       detail=f"Status: {row.get('status', 'unknown')} · Confidence: {row.get('confidence_level', 'n/a')}"[:600],
+                       confidence="Reportado pela fonte")
+
+
+def urlhaus_matches(seeds):
+    for seed in seeds:
+        if seed["kind"] == "Domínio":
+            host = seed["value"]
+        elif seed["kind"] == "IP" and ipaddress.ip_address(seed["value"]).is_global:
+            host = seed["value"]
+        elif seed["kind"] == "URL":
+            host = urlsplit(seed["value"]).hostname
+        else:
+            continue
+        if not host:
+            continue
+        result = abuse_post(URLHAUS_HOST, {"host": host}, "URLhaus")
+        if not result or result.get("query_status") != "ok":
+            continue
+        for row in array(result.get("urls")):
+            if not isinstance(row, dict) or not clean_url(row.get("url")):
+                continue
+            status = str(row.get("url_status") or "unknown")
+            yield relation(seed, "URL maliciosa", clean_url(row.get("url"))[:220], "Listed by URLhaus",
+                           "URLhaus", date=str(row.get("date_added") or "")[:10], reference=clean_url(row.get("url")),
+                           detail=f"Status: {status} · Threat: {row.get('threat', 'n/a')}"[:600],
+                           confidence="Reportado pela fonte")
+
+
+def malwarebazaar_matches(seeds):
+    for seed in seeds:
+        if seed["kind"] != "Hash" or len(seed["value"]) not in (32, 40, 64):
+            continue
+        result = abuse_post(MALWAREBAZAAR, {"query": "get_info", "hash": seed["value"]}, "MalwareBazaar")
+        if not result or result.get("query_status") != "ok":
+            continue
+        for row in array(result.get("data")):
+            if not isinstance(row, dict):
+                continue
+            signature = row.get("signature") or row.get("file_type") or "sample"
+            sha256 = str(row.get("sha256_hash") or "")
+            reference = f"https://bazaar.abuse.ch/sample/{sha256}/" if re.fullmatch(r"[a-fA-F0-9]{64}", sha256) else "https://bazaar.abuse.ch/browse/"
+            yield relation(seed, "Malware", str(signature)[:200], "Known malware sample", "MalwareBazaar",
+                           date=str(row.get("first_seen") or "")[:10], reference=reference,
+                           detail=f"File type: {row.get('file_type', 'n/a')} · First seen: {row.get('first_seen', 'n/a')}"[:600],
+                           confidence="Reportado pela fonte")
+
+
 def initialize(conn):
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS cti_cases (
@@ -869,7 +982,8 @@ def authenticated_sources():
 def configured_sources():
     sources = ["MISP local", "Histórico local"]
     if os.getenv("OSINT_WEB", "1") == "1":
-        sources.extend(("CIRCL OSINT", "ThreatDefence", "MITRE ATT&CK", "GitHub público", "Mwmbl", "Arquivo.pt", "MISP Galaxy"))
+        sources.extend(("CIRCL OSINT", "ThreatDefence", "MITRE ATT&CK", "GitHub público", "Mwmbl", "Arquivo.pt",
+                        "MISP Galaxy", "CISA KEV", "Feodo Tracker", "URLhaus", "MalwareBazaar"))
         if os.getenv("OSINT_SEARCH_URL"):
             sources.extend(("Relatórios históricos na web", "Menções públicas", "Busca web", "Official cybercrime publications"))
         if os.getenv("RANSOMWARE_LIVE_API_KEY", "").strip():

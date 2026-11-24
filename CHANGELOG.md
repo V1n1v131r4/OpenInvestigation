@@ -19,6 +19,9 @@ semantic versioning once releases are tagged.
 
 ### Added
 
+- New no-key CTI sources, each with a size limit, timeout, typed errors, and a fixture test, slotted
+  into the TLP policy: CISA KEV and Feodo Tracker (downloaded catalogs matched locally, so they run
+  under AMBER) and URLhaus and MalwareBazaar (seed lookups, reputation — opt-in under AMBER).
 - New seed types with validators: email, CVE, ASN, CIDR, JA3, JARM, crypto wallet (BTC/ETH),
   imphash, ssdeep, filename, and mutex, the ambiguous ones taking a prefix (`ja3:`, `jarm:`,
   `imphash:`, `ssdeep:`, `file:`, `mutex:`). Defanged input (`hxxp`, `[.]`, `(.)`, `[:]`, `[at]`) is

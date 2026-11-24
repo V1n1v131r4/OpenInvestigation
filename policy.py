@@ -18,12 +18,14 @@ TLP_LEVELS = ("CLEAR", "GREEN", "AMBER", "RED")
 DEFAULT_TLP = "AMBER"
 
 LOCAL_SOURCES = frozenset({"MISP local", "Histórico local"})
-CATALOG_SOURCES = frozenset({"MITRE ATT&CK", "MISP Galaxy", "CIRCL OSINT", "ThreatDefence"})
+CATALOG_SOURCES = frozenset({"MITRE ATT&CK", "MISP Galaxy", "CIRCL OSINT", "ThreatDefence",
+                             "CISA KEV", "Feodo Tracker"})
 WEB_SEARCH_SOURCES = frozenset({
     "Busca web", "GitHub público", "Mwmbl", "Arquivo.pt",
     "Relatórios históricos na web", "Menções públicas", "Official cybercrime publications",
 })
-REPUTATION_SOURCES = frozenset({"VirusTotal", "Shodan", "ThreatFox", "Ransomware.live"})
+REPUTATION_SOURCES = frozenset({"VirusTotal", "Shodan", "ThreatFox", "Ransomware.live",
+                                "URLhaus", "MalwareBazaar"})
 LLM_SOURCES = frozenset({"OpenCode"})
 ALL_SOURCES = LOCAL_SOURCES | CATALOG_SOURCES | WEB_SEARCH_SOURCES | REPUTATION_SOURCES | LLM_SOURCES
 
