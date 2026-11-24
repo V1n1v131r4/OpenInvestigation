@@ -584,6 +584,40 @@ class ThreatIntelligence(unittest.TestCase):
         self.assertTrue(ioc_rows)
         self.assertTrue(all("decay" in row and "age_days" in row["decay"] for row in ioc_rows))
 
+    def test_new_indicator_types_are_recognized(self):
+        expect = {
+            "user@example.com": "Email",
+            "CVE-2024-12345": "CVE",
+            "AS13335": "ASN",
+            "10.0.0.0/8": "CIDR",
+            "0x" + "a" * 40: "Wallet",
+            "1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2": "Wallet",
+            "ja3:" + "a" * 32: "JA3",
+            "imphash:" + "b" * 32: "Imphash",
+            "jarm:" + "c" * 62: "JARM",
+            "d" * 62: "JARM",
+            "ssdeep:3:AbCdEf:GhIjKl": "Ssdeep",
+            "96:AbCdEfGh:IjKlMnOp": "Ssdeep",
+            "mutex:Global\\Example": "Mutex",
+            "file:dropper.exe": "Filename",
+        }
+        for value, kind in expect.items():
+            typed = cti.indicator(value)
+            self.assertIsNotNone(typed, value)
+            self.assertEqual(typed[0], kind, value)
+        self.assertEqual(cti.indicator("8.8.8.8")[0], "IP")
+        self.assertEqual(cti.indicator("evil.example")[0], "Domínio")
+
+    def test_defanged_input_is_normalized_and_original_kept(self):
+        seeds = {s["kind"]: s for s in cti.parse_seeds(
+            "hxxps://evil[.]com/a\n1.2.3[.]4\nuser[at]example[.]com")}
+        self.assertEqual(seeds["URL"]["value"], "https://evil.com/a")
+        self.assertEqual(seeds["URL"]["original"], "hxxps://evil[.]com/a")
+        self.assertEqual(seeds["IP"]["value"], "1.2.3.4")
+        self.assertEqual(seeds["Email"]["value"], "user@example.com")
+        term = cti.parse_seeds("quarterly report at headquarters")[0]
+        self.assertEqual((term["kind"], term["value"]), ("Termo", "quarterly report at headquarters"))
+
     def test_entities_resolve_aliases_to_one_canonical_entity(self):
         import entities
         attack = [{"type": "intrusion-set", "name": "APT29", "aliases": ["Cozy Bear", "The Dukes"]}]

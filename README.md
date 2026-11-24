@@ -76,7 +76,7 @@ docker compose up -d osint
 
 ## Investigate a case
 
-1. Enter up to 20 inputs, one per line. Supported inputs include IPv4, IPv6, domains, URLs, hashes, APT group names and aliases, and free-text search terms. Prefix a User-Agent with `ua:`.
+1. Enter up to 20 inputs, one per line. Supported inputs include IPv4, IPv6, CIDR ranges, domains, URLs, hashes, emails, CVEs, ASNs, crypto wallets (BTC/ETH), APT group names and aliases, and free-text search terms. Defanged input (`hxxp`, `[.]`, `[at]`) is normalized automatically, keeping the original. Prefix ambiguous types: `ua:`, `ja3:`, `jarm:`, `imphash:`, `ssdeep:`, `file:`, `mutex:`.
 2. Follow **Live activity** or browse the **Relationship graph**. Select a node to open the evidence panel. Drag the background to pan, and use the zoom controls or **Fit graph** to navigate.
 3. Use **Case assessment** below the graph to review the conclusion, claims, hypotheses, and cited evidence. The orange confidence badge explains the score on a 0–5 scale. Each evidence item carries an Admiralty code (e.g. `B2`): a source-reliability letter from `reliability.json` and an information-credibility number. A text match confirms the term is present, not that the claim is true.
 4. Confirm or reject individual evidence items. If you reject a cited item, the assessment and its confidence become out of date. **Reassess case** uses the stored evidence. **Run investigation again** searches confirmed entities when available and otherwise uses the original targets.
