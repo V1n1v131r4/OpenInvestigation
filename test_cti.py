@@ -550,6 +550,24 @@ class ThreatIntelligence(unittest.TestCase):
         self.assertIsInstance(case["score"]["score"], int)
         self.assertTrue(case["score"]["reasons"])
 
+    def test_ioc_weight_decays_after_the_window(self):
+        from datetime import date
+        today = date(2026, 11, 24)
+        fresh = cti.ioc_weight("IP", "2026-11-01", today)
+        self.assertEqual((fresh["age_days"], fresh["weight"]), (23, 1.0))
+        old = cti.ioc_weight("Domínio", "2024-01-01", today)
+        self.assertLess(old["weight"], 1.0)
+        self.assertGreaterEqual(old["weight"], 0.1)
+        self.assertIsNone(cti.ioc_weight("Grupo", "2024-01-01", today))
+        self.assertIsNone(cti.ioc_weight("IP", ""))
+
+    def test_case_attaches_temporal_decay_to_ioc_evidence(self):
+        _, case = self.collect("143.198.64.151", tlp="RED")
+        ioc_rows = [row for row in case["relations"]
+                    if row.get("origin_kind") == "IP" and row.get("date") and row["source"] != "OpenCode"]
+        self.assertTrue(ioc_rows)
+        self.assertTrue(all("decay" in row and "age_days" in row["decay"] for row in ioc_rows))
+
     def test_red_case_gets_a_code_generated_assessment(self):
         _, case = self.collect("143.198.64.151", tlp="RED")
         assessment = case.get("assessment")

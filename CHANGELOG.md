@@ -38,6 +38,9 @@ semantic versioning once releases are tagged.
   hosted model is allowed (RED/AMBER or the model disabled) the application writes a deterministic,
   code-generated assessment from the score, reasons, and cited evidence, so every case has a written
   conclusion; under GREEN/CLEAR a model rewrites the prose instead.
+- Temporal decay for IP and domain IOCs: each such evidence gets an age in days and a weight that
+  declines once the sighting is older than `OSINT_IOC_DECAY_DAYS` (default 90), shown in the evidence
+  panel and noted in the assessment, since infrastructure is reassigned over time.
 - Independence clustering: evidence is grouped into independent-origin clusters using a simhash of
   the page text (near-duplicate republications collapse together, configurable via
   `OSINT_SIMHASH_DISTANCE`), shared reference URLs, and citation links (one page citing another's

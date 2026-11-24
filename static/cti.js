@@ -399,6 +399,10 @@ function inspect(node) {
       article.append(el("p", "Admiralty · " + relation.admiralty.code + " (source reliability " +
         relation.admiralty.reliability + ", info credibility " + relation.admiralty.credibility + ")", "muted"));
     }
+    if (relation.decay) {
+      article.append(el("p", "IOC age " + relation.decay.age_days + " day(s) · weight " +
+        relation.decay.weight + (relation.decay.weight < 1 ? " (aged beyond " + relation.decay.period_days + " days)" : ""), "muted"));
+    }
     if (relation.context) article.append(el("p", "Context · " + label(relation.context), "muted"));
     if (relation.model) article.append(el("p", "Model " + relation.model, "muted"));
     if (relation.activity_date) article.append(el("p", "Activity observed on " + relation.activity_date, "muted"));

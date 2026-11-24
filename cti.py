@@ -536,6 +536,11 @@ def case_intelligence(conn, case):
     graded = [row for row in rows if row["source"] != "OpenCode" and row["review"] != "rejected"]
     case["independent_clusters"] = cluster_evidence(graded)
     case["score"] = score(graded)
+    for row in rows:
+        if row["source"] != "OpenCode":
+            decay = ioc_weight(row.get("origin_kind"), row.get("date")) or ioc_weight(row.get("kind"), row.get("date"))
+            if decay:
+                row["decay"] = decay
     current = next((row for row in reversed(rows) if row["source"] == "OpenCode"
                     and row["review"] != "rejected"), None)
     rejected = {row["id"] for row in rows if row["review"] == "rejected"}
@@ -1199,6 +1204,29 @@ def score(evidence):
     return {"score": value, "reasons": reasons}
 
 
+def ioc_weight(kind, date, today=None):
+    """Temporal decay for IP and domain IOCs: full weight within the window, declining afterwards.
+
+    Returns {age_days, weight, period_days} or None for non-IOC kinds or missing/invalid dates.
+    The window is OSINT_IOC_DECAY_DAYS (default 90); infrastructure reassigns, so an old sighting
+    is weaker evidence of current use.
+    """
+    if kind not in ("IP", "Domínio") or not isinstance(date, str) or not date:
+        return None
+    try:
+        observed = datetime.fromisoformat(date[:10]).date()
+    except ValueError:
+        return None
+    reference = today or datetime.now(timezone.utc).date()
+    age = max(0, (reference - observed).days)
+    try:
+        period = max(1, int(os.getenv("OSINT_IOC_DECAY_DAYS", "90")))
+    except ValueError:
+        period = 90
+    weight = 1.0 if age <= period else max(0.1, round(period / age, 2))
+    return {"age_days": age, "weight": weight, "period_days": period}
+
+
 def verified_mentions(observations):
     from collectors import phrase_match
     inspected = set()
@@ -1535,6 +1563,11 @@ def compose_parecer(payload, score_result):
             continue
         ids = ", ".join(item["id"] for item in findings[:8])
         parts.append(f"{entry['termo']} ({entry['tipo']}): {len(findings)} evidence item(s) [{ids}].")
+    aged = sum(1 for entry in payload if entry.get("tipo") in ("IP", "Domínio")
+               for item in (entry.get("achados") or [])
+               if (decay := ioc_weight(entry["tipo"], item.get("data"))) and decay["weight"] < 1.0)
+    if aged:
+        parts.append(f"{aged} indicator evidence item(s) are older than the decay window and carry reduced weight.")
     parts.append("No model wrote this assessment; review the cited evidence. A confirmed text match "
                  "establishes a term's presence, not the truth of a claim.")
     return " ".join(parts)[:3200]
