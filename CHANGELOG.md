@@ -8,9 +8,13 @@ semantic versioning once releases are tagged.
 
 ### Changed
 
+- Relaxed the model-assessment validation so a valid response is not rejected: a single real
+  citation anywhere in the response is enough (hallucinated IDs are ignored rather than sinking the
+  whole assessment), and the model's confidence number is coerced and clamped to 0–5 instead of
+  rejected, since the code score is authoritative.
 - The code-generated assessment is now also a fallback: when a hosted model is configured but every
-  model fails (quota, rejected citations, errors), the case falls back to the code-written parecer
-  instead of ending with no conclusion.
+  model still fails (quota, errors), the case falls back to the code-written parecer instead of
+  ending with no conclusion.
 - Refocused the tool on threat intelligence only (IOCs, actors, malware, campaigns) and removed
   the legacy people-and-organization investigation flow.
 - Trimmed `collectors.py` to the CTI web-search surface (`download`, `fetch`, `clean`,
