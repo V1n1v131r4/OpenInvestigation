@@ -1520,6 +1520,42 @@ def assess_with_model(payload, model):
     return summary.strip()[:3200], confidence, metadata
 
 
+def compose_parecer(payload, score_result):
+    """Deterministic assessment prose from the code score and the collected evidence.
+
+    Produced for every case regardless of TLP, so RED/AMBER cases have a written assessment even
+    when no model runs. Under GREEN/CLEAR a model may rewrite this prose, but never the score.
+    """
+    parts = [f"Automated assessment generated from the collected evidence. Confidence {score_result['score']}/5."]
+    parts.extend(score_result["reasons"])
+    for entry in payload:
+        findings = entry.get("achados") or []
+        if not findings:
+            parts.append(f"{entry['termo']} ({entry['tipo']}): no linked public evidence.")
+            continue
+        ids = ", ".join(item["id"] for item in findings[:8])
+        parts.append(f"{entry['termo']} ({entry['tipo']}): {len(findings)} evidence item(s) [{ids}].")
+    parts.append("No model wrote this assessment; review the cited evidence. A confirmed text match "
+                 "establishes a term's presence, not the truth of a claim.")
+    return " ".join(parts)[:3200]
+
+
+def code_assessment(seeds, payload, score_result):
+    summary = compose_parecer(payload, score_result)
+    citations = [item for entry in payload for item in entry["achados"]]
+    assessment_id = str(uuid.uuid4())
+    for seed in seeds:
+        row = relation(seed, "Síntese", "Parecer do caso", "Síntese dos achados",
+                       "OpenCode", detail=summary, confidence="Síntese automática · a conferir",
+                       target_id="case-assessment")
+        row["model"] = "code"
+        row["case_confidence"] = score_result["score"]
+        row["confidence_reason"] = " ".join(score_result["reasons"])
+        row["citations"] = citations
+        row["assessment_id"] = assessment_id
+        yield row
+
+
 def enrich_case(seeds, payload, models, on_attempt):
     failures = []
     shared_quota = False

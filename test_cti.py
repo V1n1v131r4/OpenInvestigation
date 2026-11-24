@@ -420,8 +420,10 @@ class ThreatIntelligence(unittest.TestCase):
         _, case = self.collect("143.198.64.151")
         self.assertIn('"143[.]198[.]64[.]151"', search.call_args.args[0])
         opened.assert_called_once_with(url, "cyfirma.com")
-        self.assertEqual({item["target"] for item in case["relations"]}, {"Relatório de teste", "APT36"})
-        self.assertTrue(all(item["date"] == "2024-09-27" for item in case["relations"]))
+        self.assertEqual({item["target"] for item in case["relations"] if item["source"] != "OpenCode"},
+                         {"Relatório de teste", "APT36"})
+        self.assertTrue(all(item["date"] == "2024-09-27"
+                            for item in case["relations"] if item["source"] != "OpenCode"))
         self.assertFalse(cti.report_match(cti.parse_seeds("143.198.64.15")[0],
                                           "O evento cita 143[.]198[.]64[.]151."))
 
@@ -449,7 +451,8 @@ class ThreatIntelligence(unittest.TestCase):
         self.enter(patch.object(cti, "attack_bundle", return_value=ATTACK_OBJECTS))
         path, case = self.collect("APT Exemplo")
         self.assertEqual(case["status"], "done")
-        self.assertEqual({item["target"] for item in case["relations"]}, {"Grupo Exemplo", "Malware Exemplo"})
+        self.assertEqual({item["target"] for item in case["relations"] if item["source"] != "OpenCode"},
+                         {"Grupo Exemplo", "Malware Exemplo"})
         Client.call(path + "/reference", {"origin": "Grupo Exemplo", "category": "forum", "title": "Discussão pública",
                                         "url": "https://example.org/forum", "detail": "A publicação menciona o grupo."}, 201)
         item = Client.call(path)["relations"][-1]
@@ -459,7 +462,8 @@ class ThreatIntelligence(unittest.TestCase):
         self.enter(patch.object(cti, "configured_sources", return_value=["MISP local", "ThreatDefence"]))
         self.enter(patch.object(cti, "cached_feed", return_value=TD))
         _, case = self.collect("192.0.2.80\nua: Exemplo/1.0")
-        self.assertEqual({item["origin_kind"] for item in case["relations"]}, {"IP", "User-Agent", "Framework"})
+        self.assertEqual({item["origin_kind"] for item in case["relations"] if item["source"] != "OpenCode"},
+                         {"IP", "User-Agent", "Framework"})
         detections = [item for item in case["relations"] if item["kind"] == "Detecção"]
         self.assertEqual(len(detections), 1)
         self.assertTrue(detections[0]["reference"].endswith("/frameworks/artex"))
@@ -488,7 +492,9 @@ class ThreatIntelligence(unittest.TestCase):
         _, case = self.collect("143.198.64.151", tlp="RED")
         self.assertIn(case["status"], ("done", "empty"))
         self.assertEqual({q["source"] for q in case["queries"]}, {"MISP local", "Histórico local"})
-        self.assertFalse(any(row["source"] == "OpenCode" for row in case["relations"]))
+        # No hosted model ran; any assessment present is the code-generated one.
+        self.assertTrue(all(row.get("model") == "code"
+                            for row in case["relations"] if row["source"] == "OpenCode"))
 
     def test_amber_case_skips_web_search_and_hosted_llm(self):
         import collectors
@@ -543,6 +549,15 @@ class ThreatIntelligence(unittest.TestCase):
         self.assertIn("score", case)
         self.assertIsInstance(case["score"]["score"], int)
         self.assertTrue(case["score"]["reasons"])
+
+    def test_red_case_gets_a_code_generated_assessment(self):
+        _, case = self.collect("143.198.64.151", tlp="RED")
+        assessment = case.get("assessment")
+        self.assertIsNotNone(assessment)
+        self.assertEqual(assessment["model"], "code")
+        self.assertTrue(assessment["detail"])
+        self.assertIsInstance(assessment["case_confidence"], int)
+        self.assertTrue(any(event["source"] == "Parecer" for event in case["events"]))
 
     def test_simhash_clusters_same_text_and_separates_distinct_pages(self):
         body = ("Transparent Tribe targeted defense entities using the Mythic framework during a "
