@@ -2,6 +2,11 @@
 import io
 import json
 
+import netblock
+
+# Enforce the offline guarantee for the whole suite before anything touches the network.
+netblock.install()
+
 import app
 
 
