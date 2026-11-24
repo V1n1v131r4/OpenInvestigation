@@ -101,6 +101,13 @@ docker compose up -d osint
 | VirusTotal | Existing analyses, with an optional `VIRUSTOTAL_API_KEY` |
 | Shodan | Observed public IP services, with an optional `SHODAN_API_KEY` |
 | ThreatFox | Public IOC associations, with an optional `THREATFOX_AUTH_KEY` |
+| CISA KEV | Known exploited vulnerabilities for CVE seeds (downloaded catalog) |
+| Feodo Tracker | Botnet C2 IPs (downloaded blocklist) |
+| URLhaus | Malicious URLs hosted on a domain or IP |
+| MalwareBazaar | Known malware samples for a hash |
+| RDAP | Registration records for an IP, domain, or ASN |
+| crt.sh | Certificate-transparency subdomains for a domain |
+| RIPEstat | Announcing AS for an IP and the AS holder |
 
 The default SearXNG configuration excludes DuckDuckGo because of recurring CAPTCHAs. Independent sources continue when a web engine is unavailable. OpenInvestigation checks accessible public HTTPS pages for textual matches and keeps unavailable pages as indexed evidence. An automatic expansion round can look up up to six indicators and two names extracted from verified pages. IOC lookups query passive data providers, and linked detection rules remain references.
 

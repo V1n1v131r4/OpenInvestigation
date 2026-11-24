@@ -638,6 +638,130 @@ def malwarebazaar_matches(seeds):
                            confidence="Reportado pela fonte")
 
 
+CERT_SUBDOMAIN_LIMIT = 40  # subdomains reported from one crt.sh query
+RIPE_ASN_LIMIT = 10        # ASNs reported for one IP
+
+
+def crtsh_matches(seeds):
+    for seed in seeds:
+        if seed["kind"] != "Domínio":
+            continue
+        domain = seed["value"]
+        try:
+            raw = download(f"https://crt.sh/?q={quote(domain)}&output=json", {"Accept": "application/json"}, limit=16_000_000)
+        except HTTPError as error:
+            if error.code == 404:
+                continue
+            raise ProviderError(f"crt.sh: HTTP {error.code}.") from None
+        except (URLError, OSError):
+            raise ProviderError("crt.sh: connection failed.") from None
+        try:
+            rows = json.loads(raw)
+        except ValueError:
+            raise ProviderError("crt.sh: invalid JSON response.") from None
+        names = {}
+        for row in rows if isinstance(rows, list) else []:
+            if not isinstance(row, dict):
+                continue
+            for name in str(row.get("name_value") or "").split("\n"):
+                name = name.strip().lower().removeprefix("*.")
+                if name and name != domain and name.endswith("." + domain) and name not in names:
+                    names[name] = row
+        for name, row in list(names.items())[:CERT_SUBDOMAIN_LIMIT]:
+            yield relation(seed, "Domínio", name, "Certificate transparency record", "crt.sh",
+                           date=str(row.get("not_before") or "")[:10], reference=f"https://crt.sh/?q={quote(name)}",
+                           detail=f"Issuer: {str(row.get('issuer_name') or 'n/a')[:300]}", confidence="Reportado pela fonte")
+
+
+def ripestat_matches(seeds):
+    base = "https://stat.ripe.net/data/"
+    for seed in seeds:
+        if seed["kind"] == "IP" and ipaddress.ip_address(seed["value"]).is_global:
+            result = provider_json(base + "network-info/data.json?resource=" + quote(seed["value"]), {}, "RIPEstat")
+            data = result.get("data") if isinstance(result, dict) else None
+            if not isinstance(data, dict):
+                continue
+            prefix = str(data.get("prefix") or "")
+            for asn in array(data.get("asns"))[:RIPE_ASN_LIMIT]:
+                if not str(asn).isdigit():
+                    continue
+                yield relation(seed, "ASN", "AS" + str(asn), "Announced by AS", "RIPEstat",
+                               reference=f"https://stat.ripe.net/AS{asn}", detail=f"Prefix: {prefix}"[:600],
+                               confidence="Reportado pela fonte")
+        elif seed["kind"] == "ASN":
+            number = seed["value"][2:]
+            result = provider_json(base + "as-overview/data.json?resource=AS" + quote(number), {}, "RIPEstat")
+            data = result.get("data") if isinstance(result, dict) else None
+            holder = str(data.get("holder") or "").strip() if isinstance(data, dict) else ""
+            if holder:
+                yield relation(seed, "Organização", holder[:220], "AS holder", "RIPEstat",
+                               reference=f"https://stat.ripe.net/AS{number}", confidence="Reportado pela fonte")
+
+
+def rdap_fetch(url, source):
+    request = Request(url, headers={"User-Agent": egress.user_agent(),
+                                    "Accept": "application/rdap+json, application/json"})
+    try:
+        # RDAP uses bootstrap redirects to the authoritative registry, so follow redirects here.
+        with build_opener(*egress.proxy_handlers()).open(request, timeout=8) as response:
+            content = response.read(2_000_001)
+    except HTTPError as error:
+        status = error.code
+        error.close()
+        if status == 404:
+            return None
+        raise ProviderError(f"{source}: HTTP {status}.") from None
+    except (URLError, OSError):
+        raise ProviderError(f"{source}: connection failed.") from None
+    if len(content) > 2_000_000:
+        raise ProviderError(f"{source}: response exceeds the size limit.")
+    try:
+        result = json.loads(content)
+    except ValueError:
+        raise ProviderError(f"{source}: invalid JSON response.") from None
+    return result if isinstance(result, dict) else None
+
+
+def _rdap_registrant(result):
+    for entity in array(result.get("entities")):
+        if not isinstance(entity, dict):
+            continue
+        roles = [str(role).lower() for role in array(entity.get("roles"))]
+        if "registrant" in roles or "administrative" in roles or not roles:
+            vcard = entity.get("vcardArray")
+            if isinstance(vcard, list) and len(vcard) == 2:
+                for field in array(vcard[1]):
+                    if isinstance(field, list) and len(field) >= 4 and field[0] == "fn":
+                        return str(field[3])[:220]
+            if entity.get("handle"):
+                return str(entity["handle"])[:220]
+    return ""
+
+
+def rdap_matches(seeds):
+    for seed in seeds:
+        if seed["kind"] == "IP" and ipaddress.ip_address(seed["value"]).is_global:
+            url = f"https://rdap.org/ip/{quote(seed['value'])}"
+        elif seed["kind"] == "Domínio":
+            url = f"https://rdap.org/domain/{quote(seed['value'])}"
+        elif seed["kind"] == "ASN":
+            url = f"https://rdap.org/autnum/{quote(seed['value'][2:])}"
+        else:
+            continue
+        result = rdap_fetch(url, "RDAP")
+        if not result:
+            continue
+        name = _rdap_registrant(result) or str(result.get("name") or result.get("handle") or "").strip()
+        if not name:
+            continue
+        events = {str(event.get("eventAction")): str(event.get("eventDate") or "")[:10]
+                  for event in array(result.get("events")) if isinstance(event, dict)}
+        date = events.get("registration") or events.get("last changed") or ""
+        yield relation(seed, "Registro", name[:220], "Registration record", "RDAP", date=date,
+                       reference=url, detail=f"Registry: {str(result.get('port43') or result.get('handle') or 'RDAP')[:200]}",
+                       confidence="Reportado pela fonte")
+
+
 def initialize(conn):
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS cti_cases (
@@ -983,7 +1107,8 @@ def configured_sources():
     sources = ["MISP local", "Histórico local"]
     if os.getenv("OSINT_WEB", "1") == "1":
         sources.extend(("CIRCL OSINT", "ThreatDefence", "MITRE ATT&CK", "GitHub público", "Mwmbl", "Arquivo.pt",
-                        "MISP Galaxy", "CISA KEV", "Feodo Tracker", "URLhaus", "MalwareBazaar"))
+                        "MISP Galaxy", "CISA KEV", "Feodo Tracker", "URLhaus", "MalwareBazaar",
+                        "RDAP", "crt.sh", "RIPEstat"))
         if os.getenv("OSINT_SEARCH_URL"):
             sources.extend(("Relatórios históricos na web", "Menções públicas", "Busca web", "Official cybercrime publications"))
         if os.getenv("RANSOMWARE_LIVE_API_KEY", "").strip():

@@ -618,6 +618,38 @@ class ThreatIntelligence(unittest.TestCase):
         self.assertEqual((found[0]["source"], found[0]["target"]), ("MalwareBazaar", "Emotet"))
         self.assertTrue(found[0]["reference"].endswith("/sample/" + "a" * 64 + "/"))
 
+    def test_crtsh_matches_subdomains_offline(self):
+        import json
+        certs = json.dumps([
+            {"name_value": "sub.evil.example\n*.evil.example", "issuer_name": "C=US, O=Example CA",
+             "not_before": "2024-02-01"},
+            {"name_value": "evil.example", "issuer_name": "x", "not_before": "2024-01-01"},
+        ]).encode()
+        self.enter(patch.object(cti, "download", return_value=certs))
+        found = list(cti.crtsh_matches(cti.parse_seeds("evil.example")))
+        self.assertEqual({row["target"] for row in found}, {"sub.evil.example"})
+        self.assertEqual(found[0]["source"], "crt.sh")
+
+    def test_ripestat_matches_ip_and_asn_offline(self):
+        def fetch(url, headers, source):
+            if "network-info" in url:
+                return {"data": {"asns": ["13335"], "prefix": "1.2.3.0/24"}}
+            return {"data": {"holder": "ACME-AS"}}
+        self.enter(patch.object(cti, "provider_json", side_effect=fetch))
+        ip_rows = list(cti.ripestat_matches(cti.parse_seeds("1.2.3.4")))
+        self.assertEqual(ip_rows[0]["target"], "AS13335")
+        asn_rows = list(cti.ripestat_matches(cti.parse_seeds("AS13335")))
+        self.assertEqual(asn_rows[0]["target"], "ACME-AS")
+
+    def test_rdap_matches_domain_offline(self):
+        record = {"name": "evil.example", "handle": "DOM123",
+                  "entities": [{"roles": ["registrant"], "vcardArray": ["vcard", [["fn", {}, "text", "Acme Registrant"]]]}],
+                  "events": [{"eventAction": "registration", "eventDate": "2020-07-01T00:00:00Z"}]}
+        self.enter(patch.object(cti, "rdap_fetch", return_value=record))
+        found = list(cti.rdap_matches(cti.parse_seeds("evil.example")))
+        self.assertEqual((found[0]["source"], found[0]["target"], found[0]["date"]),
+                         ("RDAP", "Acme Registrant", "2020-07-01"))
+
     def test_new_indicator_types_are_recognized(self):
         expect = {
             "user@example.com": "Email",

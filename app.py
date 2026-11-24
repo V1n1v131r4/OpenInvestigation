@@ -137,6 +137,12 @@ def submit_cti_iocs(case_id, seeds, entries, sources):
         tasks.append(COLLECTORS.submit(cti_stage, case_id, "URLhaus", lambda: cti.urlhaus_matches(seeds), values))
     if "MalwareBazaar" in sources and any(seed["kind"] == "Hash" for seed in seeds):
         tasks.append(COLLECTORS.submit(cti_stage, case_id, "MalwareBazaar", lambda: cti.malwarebazaar_matches(seeds), values))
+    if "RDAP" in sources and any(seed["kind"] in ("IP", "Domínio", "ASN") for seed in seeds):
+        tasks.append(COLLECTORS.submit(cti_stage, case_id, "RDAP", lambda: cti.rdap_matches(seeds), values))
+    if "crt.sh" in sources and any(seed["kind"] == "Domínio" for seed in seeds):
+        tasks.append(COLLECTORS.submit(cti_stage, case_id, "crt.sh", lambda: cti.crtsh_matches(seeds), values))
+    if "RIPEstat" in sources and any(seed["kind"] in ("IP", "ASN") for seed in seeds):
+        tasks.append(COLLECTORS.submit(cti_stage, case_id, "RIPEstat", lambda: cti.ripestat_matches(seeds), values))
     if has_iocs:
         for source, (variable, collector) in cti.authenticated_sources().items():
             if source in sources:
