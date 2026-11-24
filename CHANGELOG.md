@@ -30,6 +30,11 @@ semantic versioning once releases are tagged.
 - LLM input sanitization: source excerpts are stripped of obvious prompt-injection patterns and
   output delimiters and capped per excerpt before being sent to the model, and the case logs how
   many excerpts were sanitized.
+- Independence clustering: evidence is grouped into independent-origin clusters using a simhash of
+  the page text (near-duplicate republications collapse together, configurable via
+  `OSINT_SIMHASH_DISTANCE`), shared reference URLs, and citation links (one page citing another's
+  URL). Each evidence gets a `cluster_id` and the case reports the number of independent clusters.
+  This replaces the previous whole-body hash.
 - Admiralty grading per evidence: a source-reliability letter (A–F) from a versioned, editable
   `reliability.json` plus an information-credibility number (1–6) derived from the evidence's
   confidence, shown as a code (e.g. B2) in the evidence panel; unknown sources default to F/6.
