@@ -525,6 +525,25 @@ class ThreatIntelligence(unittest.TestCase):
         self.assertTrue(graded)
         self.assertTrue(all(row.get("admiralty", {}).get("code") for row in graded))
 
+    def test_score_rules_cover_every_ceiling(self):
+        ev = lambda cluster, credibility: {"cluster_id": cluster, "reference": f"https://s/{cluster}/{credibility}",
+                                           "admiralty": {"credibility": credibility}}
+        self.assertEqual(cti.score([])["score"], 0)
+        self.assertEqual(cti.score([ev(1, 1), ev(1, 1)])["score"], 2)   # single cluster → ceiling 2
+        self.assertEqual(cti.score([ev(1, 3), ev(2, 3)])["score"], 3)   # 2 clusters, weak credibility
+        self.assertEqual(cti.score([ev(1, 2), ev(2, 2)])["score"], 4)   # 2 clusters, high credibility
+        self.assertEqual(cti.score([ev(1, 1), ev(2, 1)])["score"], 5)   # 2 clusters, confirmed
+        self.assertEqual(cti.score([ev(1, 1), ev(2, 3)])["score"], 3)   # only one strong cluster
+        # Evidence without a cluster or a reference does not count.
+        self.assertEqual(cti.score([{"reference": "https://x", "admiralty": {"credibility": 1}}])["score"], 0)
+        self.assertTrue(cti.score([ev(1, 1), ev(2, 1)])["reasons"])
+
+    def test_case_exposes_code_computed_score(self):
+        _, case = self.collect("143.198.64.151", tlp="CLEAR")
+        self.assertIn("score", case)
+        self.assertIsInstance(case["score"]["score"], int)
+        self.assertTrue(case["score"]["reasons"])
+
     def test_simhash_clusters_same_text_and_separates_distinct_pages(self):
         body = ("Transparent Tribe targeted defense entities using the Mythic framework during a "
                 "2024 campaign against government networks in the region. ") * 4

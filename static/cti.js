@@ -607,15 +607,21 @@ function render(data) {
   const status = el("span", undefined, "metric cti-status" + (active ? " active" : ""));
   status.append(el("span", active ? "◌" : "●", "cti-status-icon"), el("span", labels[data.status] || data.status));
   const conclusion = data.assessment || latestConclusion(data.relations);
-  const score = conclusion?.case_confidence;
-  const hasScore = Number.isInteger(score) && score >= 0 && score <= 5;
+  // The code score is authoritative; the model (when it runs) only writes the prose.
+  const score = Number.isInteger(data.score?.score) ? data.score.score : conclusion?.case_confidence;
+  const clustered = data.relations.some((relation) => relation.cluster_id);
+  const hasScore = Number.isInteger(score) && (conclusion != null || clustered);
   const confidence = el("details", undefined, "metric cti-confidence");
   confidence.open = $("cti-counts").querySelector(".cti-confidence")?.open || false;
   confidence.append(el("summary", hasScore
-    ? "Confidence " + score + "/5" + (conclusion.stale ? " · out of date" : "")
+    ? "Confidence " + score + "/5" + (conclusion?.stale ? " · out of date" : "")
     : "Confidence pending"),
-    el("p", conclusion?.confidence_reason || "The score reflects evidence quality and independence."));
-  if (hasScore && Number.isInteger(conclusion.cited_domains)) {
+    el("p", conclusion?.confidence_reason || "The score is computed from evidence credibility and the number of independent clusters."));
+  for (const reason of data.score?.reasons || []) confidence.append(el("p", reason, "muted"));
+  if (conclusion && Number.isInteger(conclusion.model_confidence) && conclusion.model_confidence !== score) {
+    confidence.append(el("p", "The model suggested " + conclusion.model_confidence + "/5; the code score prevails.", "muted"));
+  }
+  if (hasScore && Number.isInteger(conclusion?.cited_domains)) {
     confidence.append(el("p", conclusion.cited_domains + " cited domain(s). Different domains may republish the same source."));
   }
   $("cti-counts").replaceChildren(status, el("span", data.relations.length + " relationships", "metric"), confidence);
