@@ -20,6 +20,7 @@ from urllib.request import Request, build_opener
 
 from collectors import NoRedirects, download
 import egress
+import noise
 import public_pages
 
 ATTACK = "https://raw.githubusercontent.com/mitre-attack/attack-stix-data/master/enterprise-attack/enterprise-attack.json"
@@ -35,6 +36,13 @@ TYPES = {"intrusion-set": "Grupo", "malware": "Malware", "tool": "Ferramenta",
          "campaign": "Campanha", "attack-pattern": "Técnica"}
 MISP_TYPES = {"ip-src", "ip-dst", "domain", "hostname", "url", "md5", "sha1", "sha256",
               "domain|ip", "ip-dst|port", "ip-src|port", "filename|md5", "filename|sha1", "filename|sha256"}
+
+# Named collection limits. A cut is recorded in the coverage event, never applied silently.
+SEED_SCAN_LIMIT = 8            # seeds or terms examined per source in one round
+EVENT_COOCCURRENCE_LIMIT = 20  # co-occurrence attributes emitted per MISP event
+ATTACK_REFERENCE_LIMIT = 25    # external references read per ATT&CK object
+ATTACK_EDGE_LIMIT = 80         # relationship edges read per ATT&CK object
+CITED_URL_LIMIT = 20           # URLs captured from a verified page body
 
 ADMIRALTY_FILE = Path(__file__).with_name("reliability.json")
 _RELIABILITY = None
@@ -183,7 +191,7 @@ def misp_matches(seeds, events, source="MISP local"):
                            date=item.get("first_seen") or event["date"], detail=detail, reference=reference,
                            target_id=event["id"])
             event_seed = {"kind": "Evento", "value": event["title"], "id": event["id"]}
-            for other in (*event["actors"], *event["iocs"][:20]):
+            for other in (*event["actors"], *event["iocs"][:EVENT_COOCCURRENCE_LIMIT]):
                 yield relation(event_seed, other["kind"], other["value"], "Coocorrência no evento", source,
                                date=other.get("first_seen") or event["date"], detail=detail, reference=reference,
                                confidence="Contexto indireto")
@@ -290,11 +298,11 @@ def attack_matches(seeds, objects):
             yield relation(seed, kind, name, "Identificado no catálogo", "MITRE ATT&CK", date=date,
                            reference=primary.get("url", ""), detail=" · ".join(filter(None, [primary.get("external_id", ""), *array(item.get("aliases"))]))[:500])
             canonical = {"kind": kind, "value": name}
-            for ref in refs[:25]:
+            for ref in refs[:ATTACK_REFERENCE_LIMIT]:
                 if ref is not primary and clean_url(ref.get("url")):
                     yield relation(canonical, "Relatório", str(ref.get("description") or ref["source_name"])[:220],
                                    "Referência citada", "MITRE ATT&CK", reference=ref["url"])
-            for edge in [edge for edge in edges if source_id in (edge.get("source_ref"), edge.get("target_ref"))][:80]:
+            for edge in [edge for edge in edges if source_id in (edge.get("source_ref"), edge.get("target_ref"))][:ATTACK_EDGE_LIMIT]:
                 opposite = edge.get("target_ref") if edge.get("source_ref") == source_id else edge.get("source_ref")
                 if opposite not in known:
                     continue
@@ -534,6 +542,24 @@ def finish_round(conn, case_id, round_id, timestamp, status):
 def case_intelligence(conn, case):
     rows = case["relations"]
     graded = [row for row in rows if row["source"] != "OpenCode" and row["review"] != "rejected"]
+    # Mark temporal decay and shared infrastructure before scoring, so a noisy IOC's reduced
+    # credibility is reflected in the code score.
+    for row in rows:
+        if row["source"] == "OpenCode":
+            continue
+        decay = ioc_weight(row.get("origin_kind"), row.get("date")) or ioc_weight(row.get("kind"), row.get("date"))
+        if decay:
+            row["decay"] = decay
+        shared = noise.classify(row.get("origin_kind"), row.get("origin")) or \
+            noise.classify(row.get("kind"), row.get("target"))
+        if shared:
+            row["shared_infrastructure"] = shared
+            if row.get("admiralty"):  # shared infrastructure weakens the evidence
+                row["admiralty"]["credibility"] = max(row["admiralty"]["credibility"], 4)
+    for seed in case["seeds"]:
+        shared = noise.classify(seed.get("kind"), seed.get("value"))
+        if shared:
+            seed["shared_infrastructure"] = shared
     case["independent_clusters"] = cluster_evidence(graded)
     case["score"] = score(graded)
     current = next((row for row in reversed(rows) if row["source"] == "OpenCode"
@@ -736,7 +762,7 @@ def historical_web_matches(seeds):
                 and (seed["kind"] != "IP" or ipaddress.ip_address(seed["value"]).is_global)
                 and (seed["kind"] != "Domínio" or not seed["value"].endswith((".local", ".internal", ".localhost")))]
     failed = None
-    for seed in eligible[:8]:
+    for seed in eligible[:SEED_SCAN_LIMIT]:
         exact = seed["value"]
         alternatives = f'"{exact}"'
         if seed["kind"] == "IP" and "." in exact:
@@ -817,7 +843,7 @@ def keyword_matches(terms):
               " (site:reddit.com OR site:news.ycombinator.com OR site:bleepingcomputer.com)",
               " (site:securelist.com OR site:unit42.paloaltonetworks.com OR site:welivesecurity.com)")
     failures = []
-    for seed in terms[:8]:
+    for seed in terms[:SEED_SCAN_LIMIT]:
         phrase = " ".join(seed["value"].replace('"', " ").split())
         if not phrase:
             continue
@@ -846,7 +872,7 @@ def keyword_matches(terms):
 
 def github_mentions(terms):
     from collectors import clean, phrase_match
-    for seed in terms[:8]:
+    for seed in terms[:SEED_SCAN_LIMIT]:
         phrase = " ".join(seed["value"].replace('"', " ").split())
         if not phrase:
             continue
@@ -912,7 +938,7 @@ def official_cybercrime_mentions(terms):
     from collectors import phrase_match, web_search
 
     scope = " OR ".join("site:" + domain for domain in OFFICIAL_CYBERCRIME)
-    for seed in terms[:8]:
+    for seed in terms[:SEED_SCAN_LIMIT]:
         phrase = " ".join(seed["value"].replace('"', " ").split())
         if not phrase:
             continue
@@ -963,7 +989,7 @@ def ransomware_live_matches(terms, key):
         raise ProviderError("Ransomware.live returned an unexpected group list.")
     names = {row["group"].strip().casefold(): row for row in catalog["groups"] if isinstance(row, dict)
              and isinstance(row.get("group"), str) and row["group"].strip()}
-    for seed in terms[:8]:
+    for seed in terms[:SEED_SCAN_LIMIT]:
         profile = names.get(seed["value"].strip().casefold())
         if not profile:
             continue
@@ -996,7 +1022,7 @@ def open_index_mentions(terms, source):
 
     global MWMBL_NEXT
     is_archive = source == "Arquivo.pt"
-    for seed in terms[:8]:
+    for seed in terms[:SEED_SCAN_LIMIT]:
         phrase = seed["value"]
         if is_archive:
             query = urlencode({"q": phrase, "maxItems": 12})
@@ -1123,7 +1149,7 @@ def hamming(left, right):
 def cited_urls(body):
     found = {clean_url(url.rstrip(".,);]")) for url in re.findall(r'https?://[^\s<>"\')]+', body or "")}
     found.discard("")
-    return sorted(found)[:20]
+    return sorted(found)[:CITED_URL_LIMIT]
 
 
 def cluster_evidence(relations, max_distance=None):
@@ -1197,6 +1223,29 @@ def score(evidence):
         value = 3
         reasons.append("Independent corroboration without high-credibility evidence: ceiling 3.")
     return {"score": value, "reasons": reasons}
+
+
+def ioc_weight(kind, date, today=None):
+    """Temporal decay for IP and domain IOCs: full weight within the window, declining afterwards.
+
+    Returns {age_days, weight, period_days} or None for non-IOC kinds or missing/invalid dates.
+    The window is OSINT_IOC_DECAY_DAYS (default 90); infrastructure reassigns, so an old sighting
+    is weaker evidence of current use.
+    """
+    if kind not in ("IP", "Domínio") or not isinstance(date, str) or not date:
+        return None
+    try:
+        observed = datetime.fromisoformat(date[:10]).date()
+    except ValueError:
+        return None
+    reference = today or datetime.now(timezone.utc).date()
+    age = max(0, (reference - observed).days)
+    try:
+        period = max(1, int(os.getenv("OSINT_IOC_DECAY_DAYS", "90")))
+    except ValueError:
+        period = 90
+    weight = 1.0 if age <= period else max(0.1, round(period / age, 2))
+    return {"age_days": age, "weight": weight, "period_days": period}
 
 
 def verified_mentions(observations):
@@ -1440,6 +1489,15 @@ def opencode_failure(result, model):
     return "OpenCode completed without returning assessment text."
 
 
+def claim_supported(texto, excerpts):
+    """A claim is supported only if a cited excerpt shares a significant term with the claim text."""
+    terms = set(re.findall(r"\w{4,}", (texto or "").casefold()))
+    if not terms:
+        return False
+    corpus = " ".join(excerpts).casefold()
+    return any(re.search(r"(?<!\w)" + re.escape(term) + r"(?!\w)", corpus) for term in terms)
+
+
 def assess_with_model(payload, model):
     prompt = (
         "Write the CTI assessment and all narrative fields in English, even when sources use another language. "
@@ -1503,7 +1561,9 @@ def assess_with_model(payload, model):
     if isinstance(justification, str):
         metadata["confidence_reason"] = justification.strip()[:1200]
     allowed_ids = {item["id"] for item in citations}
+    excerpt_by_id = {item["id"]: item.get("trecho", "") for item in citations}
     referenced = set(cited_ids)
+    unsupported = 0
     for field, stances in [("afirmacoes", ("evidencias",)), ("hipoteses", ("favor", "contra", "contexto"))]:
         values = []
         for entry in array(parsed.get(field))[:12]:
@@ -1512,10 +1572,18 @@ def assess_with_model(payload, model):
             links = {stance: list(dict.fromkeys(value for value in array(entry.get(stance))
                                                 if isinstance(value, str) and value in allowed_ids))
                      for stance in stances}
-            if any(links.values()):
-                values.append({"texto": entry["texto"].strip()[:800], **links})
-                referenced.update(value for ids in links.values() for value in ids)
+            if not any(links.values()):
+                continue
+            if field == "afirmacoes" and not claim_supported(
+                    entry["texto"], [excerpt_by_id.get(cid, "") for cid in links["evidencias"]]):
+                # The cited evidence does not mention the claim's terms: drop it and count it.
+                unsupported += 1
+                continue
+            values.append({"texto": entry["texto"].strip()[:800], **links})
+            referenced.update(value for ids in links.values() for value in ids)
         metadata[field] = values
+    if unsupported:
+        metadata["unsupported_claims"] = unsupported
     metadata["citations"] = [item for item in citations if item["id"] in referenced]
     return summary.strip()[:3200], confidence, metadata
 
@@ -1533,8 +1601,13 @@ def compose_parecer(payload, score_result):
         if not findings:
             parts.append(f"{entry['termo']} ({entry['tipo']}): no linked public evidence.")
             continue
-        ids = ", ".join(item["id"] for item in findings[:8])
+        ids = ", ".join(item["id"] for item in findings[:SEED_SCAN_LIMIT])
         parts.append(f"{entry['termo']} ({entry['tipo']}): {len(findings)} evidence item(s) [{ids}].")
+    aged = sum(1 for entry in payload if entry.get("tipo") in ("IP", "Domínio")
+               for item in (entry.get("achados") or [])
+               if (decay := ioc_weight(entry["tipo"], item.get("data"))) and decay["weight"] < 1.0)
+    if aged:
+        parts.append(f"{aged} indicator evidence item(s) are older than the decay window and carry reduced weight.")
     parts.append("No model wrote this assessment; review the cited evidence. A confirmed text match "
                  "establishes a term's presence, not the truth of a claim.")
     return " ".join(parts)[:3200]

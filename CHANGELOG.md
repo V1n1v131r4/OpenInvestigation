@@ -38,6 +38,20 @@ semantic versioning once releases are tagged.
   hosted model is allowed (RED/AMBER or the model disabled) the application writes a deterministic,
   code-generated assessment from the score, reasons, and cited evidence, so every case has a written
   conclusion; under GREEN/CLEAR a model rewrites the prose instead.
+- Temporal decay for IP and domain IOCs: each such evidence gets an age in days and a weight that
+  declines once the sighting is older than `OSINT_IOC_DECAY_DAYS` (default 90), shown in the evidence
+  panel and noted in the assessment, since infrastructure is reassigned over time.
+- Shared-infrastructure noise filter (`noise.py`, editable `noise.json`, override via
+  `OSINT_NOISE_FILE`): seeds and evidence on public DNS, cloud/CDN, or hosting infrastructure are
+  marked `shared_infrastructure` and their Admiralty credibility is lowered so they cannot drive the
+  score up.
+- Entity resolution (`entities.py`): a canonical identity and alias graph from ATT&CK and MISP
+  Galaxy, with per-alias sources, cross-catalog overlaps, and intra-catalog conflicts flagged.
+- Model-claim validation: each assessment claim must cite evidence whose excerpt shares a term with
+  the claim; unsupported claims are dropped and counted.
+- Explicit truncation: collection caps are named constants instead of silent slices, a stage that
+  hits its row limit is marked truncated (partial) in the run history, and a test guards against new
+  silent cuts.
 - Independence clustering: evidence is grouped into independent-origin clusters using a simhash of
   the page text (near-duplicate republications collapse together, configurable via
   `OSINT_SIMHASH_DISTANCE`), shared reference URLs, and citation links (one page citing another's

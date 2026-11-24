@@ -23,6 +23,8 @@ DB = Path(os.getenv("OSINT_DATA_DIR", "./data")) / "cases.sqlite3"
 WORKERS = ThreadPoolExecutor(max_workers=3)
 COLLECTORS = ThreadPoolExecutor(max_workers=6)
 SESSION = secrets.token_urlsafe(24)
+STAGE_ROW_LIMIT = 1200      # rows kept from one source stage before it is marked truncated
+ENTITY_CONTEXT_LIMIT = 25   # entities carried into the ATT&CK lookup
 
 
 def now():
@@ -87,6 +89,7 @@ def cti_stage(case_id, source, callback, terms=None):
     rows = []
     saved = inserted = 0
     error = None
+    truncated = False
     incremental = source in (*cti.WEB_MENTION_SOURCES, "Verificação web")
     try:
         for row in callback():
@@ -95,13 +98,16 @@ def cti_stage(case_id, source, callback, terms=None):
                 with database() as conn:
                     inserted += cti.save(conn, case_id, rows[saved:])
                 saved = len(rows)
-            if len(rows) == 1200:
+            if len(rows) == STAGE_ROW_LIMIT:
+                truncated = True
                 break
     except Exception as exc:
         error = source_error(exc)
     with database() as conn:
         inserted += cti.save(conn, case_id, rows[saved:])
         message = f"{inserted} new relationship(s) · {len(rows)} found."
+        if truncated:
+            message += f" Truncated at {STAGE_ROW_LIMIT} (partial)."
         if error:
             message += " Source unavailable: " + error
         cti.event(conn, case_id, source, "error" if error else "done", message, now(), found=len(rows))
@@ -224,7 +230,7 @@ def run_cti(case_id, seeds):
         context = [*seeds, *({"kind": row["kind"], "value": row["target"]} for row in observations
                              if row["kind"] in ("Grupo", "Campanha", "Malware", "Alias"))]
         entities = list({(seed["kind"], seed["value"].casefold()): seed for seed in context
-                         if seed["kind"] in ("Termo", "Grupo", "Campanha", "Malware", "Ferramenta", "Alias")}.values())[:25]
+                         if seed["kind"] in ("Termo", "Grupo", "Campanha", "Malware", "Ferramenta", "Alias")}.values())[:ENTITY_CONTEXT_LIMIT]
         if entities:
             rows, error = cti_stage(case_id, "MITRE ATT&CK", lambda: cti.attack_matches(entities, cti.attack_bundle()),
                                     [entity["value"] for entity in entities])

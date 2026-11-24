@@ -309,6 +309,22 @@ class ThreatIntelligence(unittest.TestCase):
         os.environ["ANTHROPIC_API_KEY"] = ""
         self.assertEqual(cti.assessment_models()[0], "opencode/big-pickle")
 
+    def test_unsupported_claims_are_dropped_and_counted(self):
+        payload = [{"termo": "artex", "tipo": "Termo",
+                    "achados": [{"id": "E1", "titulo": "ARTEX", "fonte": "GitHub público",
+                                 "url": "https://github.com/example/ARTEX", "data": "",
+                                 "trecho": "Public repository describing the ARTEX project."}]}]
+        output = ('{"parecer":"The ARTEX project is public (E1).","confianca":2,'
+                  '"afirmacoes":['
+                  '{"texto":"ARTEX is a public repository.","evidencias":["E1"]},'
+                  '{"texto":"The group bombed a power grid.","evidencias":["E1"]}]}')
+        self.enter(patch.object(cti.subprocess, "run",
+                                return_value=subprocess.CompletedProcess([], 0, output, "")))
+        _, _, metadata = cti.assess_with_model(payload, "opencode/big-pickle")
+        claims = [claim["texto"] for claim in metadata["afirmacoes"]]
+        self.assertEqual(claims, ["ARTEX is a public repository."])  # grounded claim kept
+        self.assertEqual(metadata["unsupported_claims"], 1)          # ungrounded claim dropped and counted
+
     def test_confidence_accepts_zero_and_rejects_out_of_range(self):
         outputs = ['{"parecer":"E1 é insuficiente.","confianca":0}',
                    '{"parecer":"E1 é insuficiente.","confianca":6}']
@@ -326,7 +342,7 @@ class ThreatIntelligence(unittest.TestCase):
         self.enter(patch.object(cti, "configured_sources", return_value=["Histórico local", "OpenCode"]))
         output = ('{"parecer":"E1 documenta a ocorrência.","confianca":3,'
                   '"justificativa":"Há documentação, com cobertura limitada.",'
-                  '"afirmacoes":[{"texto":"Há registro público.","evidencias":["E1","E999"]}],'
+                  '"afirmacoes":[{"texto":"The historical record documents this address.","evidencias":["E1","E999"]}],'
                   '"hipoteses":[{"texto":"Infraestrutura histórica.","favor":["E1"],"contra":[],"contexto":[]}]}')
         self.enter(patch.object(cti.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, output, "")))
         path, original = self.collect(ip)
@@ -549,6 +565,65 @@ class ThreatIntelligence(unittest.TestCase):
         self.assertIn("score", case)
         self.assertIsInstance(case["score"]["score"], int)
         self.assertTrue(case["score"]["reasons"])
+
+    def test_ioc_weight_decays_after_the_window(self):
+        from datetime import date
+        today = date(2026, 11, 24)
+        fresh = cti.ioc_weight("IP", "2026-11-01", today)
+        self.assertEqual((fresh["age_days"], fresh["weight"]), (23, 1.0))
+        old = cti.ioc_weight("Domínio", "2024-01-01", today)
+        self.assertLess(old["weight"], 1.0)
+        self.assertGreaterEqual(old["weight"], 0.1)
+        self.assertIsNone(cti.ioc_weight("Grupo", "2024-01-01", today))
+        self.assertIsNone(cti.ioc_weight("IP", ""))
+
+    def test_case_attaches_temporal_decay_to_ioc_evidence(self):
+        _, case = self.collect("143.198.64.151", tlp="RED")
+        ioc_rows = [row for row in case["relations"]
+                    if row.get("origin_kind") == "IP" and row.get("date") and row["source"] != "OpenCode"]
+        self.assertTrue(ioc_rows)
+        self.assertTrue(all("decay" in row and "age_days" in row["decay"] for row in ioc_rows))
+
+    def test_entities_resolve_aliases_to_one_canonical_entity(self):
+        import entities
+        attack = [{"type": "intrusion-set", "name": "APT29", "aliases": ["Cozy Bear", "The Dukes"]}]
+        galaxy = [{"value": "Cozy Bear", "meta": {"synonyms": ["Nobelium"]}}]
+        graph = entities.EntityGraph(attack, galaxy)
+        # Different alias names resolve to the same entity when the catalogs link them.
+        self.assertEqual(graph.resolve("The Dukes"), graph.resolve("Nobelium"))
+        entity = graph.resolve("apt29")
+        self.assertEqual(entity["canonical"], "APT29")
+        self.assertIn("Nobelium", entity["aliases"])
+        self.assertTrue(entity["overlaps"])  # linked across ATT&CK and Galaxy
+        self.assertIsNone(graph.resolve("Unknown Group"))
+
+    def test_entities_flag_intra_catalog_conflicts(self):
+        import entities
+        # One catalog gives two differently-named entries the same alias -> ambiguous.
+        galaxy = [{"value": "Group A", "meta": {"synonyms": ["Shared Alias"]}},
+                  {"value": "Group B", "meta": {"synonyms": ["Shared Alias"]}}]
+        graph = entities.EntityGraph(None, galaxy)
+        self.assertTrue(graph.conflicts())
+
+    def test_noise_flags_shared_infrastructure_only(self):
+        import noise
+        self.assertTrue(noise.classify("IP", "8.8.8.8"))
+        self.assertTrue(noise.classify("Domínio", "d111abcdef.cloudfront.net"))
+        self.assertTrue(noise.classify("URL", "https://foo.herokuapp.com/x"))
+        self.assertFalse(noise.classify("IP", "143.198.64.151"))
+        self.assertFalse(noise.classify("Domínio", "example.org"))
+
+    def test_case_marks_shared_infrastructure_seed(self):
+        _, case = self.collect("8.8.8.8", tlp="RED")
+        self.assertTrue(any(seed.get("shared_infrastructure") for seed in case["seeds"]))
+
+    def test_no_silent_result_cuts_remain(self):
+        root = Path(__file__).parent
+        cti_src = (root / "cti.py").read_text(encoding="utf-8")
+        for literal in ("[:8]", "[:20]", "[:25]", "[:80]"):
+            self.assertNotIn(literal, cti_src, f"silent cut {literal} remains in cti.py")
+        self.assertNotIn("== 1200", (root / "app.py").read_text(encoding="utf-8"))
+        self.assertNotIn("[:8]", (root / "collectors.py").read_text(encoding="utf-8"))
 
     def test_red_case_gets_a_code_generated_assessment(self):
         _, case = self.collect("143.198.64.151", tlp="RED")

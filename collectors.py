@@ -9,6 +9,9 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 import egress
 
 
+WEB_RESULT_LIMIT = 8  # results read from one web-search response
+
+
 class NoRedirects(HTTPRedirectHandler):
     def redirect_request(self, *args, **kwargs):
         return None
@@ -71,7 +74,7 @@ def web_search(query):
     unavailable = data.get("unresponsive_engines")
     if not rows and isinstance(unavailable, list) and unavailable:
         raise SearchEnginesUnavailable(unavailable)
-    for row in rows[:8]:
+    for row in rows[:WEB_RESULT_LIMIT]:
         if not isinstance(row, dict):
             continue
         excerpt = clean(row.get("content") or "")

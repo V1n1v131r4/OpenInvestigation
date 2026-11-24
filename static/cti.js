@@ -399,6 +399,13 @@ function inspect(node) {
       article.append(el("p", "Admiralty · " + relation.admiralty.code + " (source reliability " +
         relation.admiralty.reliability + ", info credibility " + relation.admiralty.credibility + ")", "muted"));
     }
+    if (relation.decay) {
+      article.append(el("p", "IOC age " + relation.decay.age_days + " day(s) · weight " +
+        relation.decay.weight + (relation.decay.weight < 1 ? " (aged beyond " + relation.decay.period_days + " days)" : ""), "muted"));
+    }
+    if (relation.shared_infrastructure) {
+      article.append(el("p", "Shared infrastructure · " + relation.shared_infrastructure + " — weak for attribution", "muted"));
+    }
     if (relation.context) article.append(el("p", "Context · " + label(relation.context), "muted"));
     if (relation.model) article.append(el("p", "Model " + relation.model, "muted"));
     if (relation.activity_date) article.append(el("p", "Activity observed on " + relation.activity_date, "muted"));
@@ -485,7 +492,9 @@ function renderIntelligence(data) {
     panel.append(el("summary", round.started_at + " · " + round.new_evidence.length + " new evidence item(s)"));
     const outcomes = el("ul");
     for (const item of round.coverage) {
-      const status = {running: "Running", error: "Unavailable", done: item.found === 0 ? "No findings" : "Queried"};
+      const partial = /Truncated at \d+ \(partial\)/.test(item.message || "");
+      const status = {running: "Running", error: "Unavailable",
+        done: partial ? "Partial" : item.found === 0 ? "No findings" : "Queried"};
       outcomes.append(el("li", label(item.source) + " · " + (status[item.status] || item.status) + " · " + eventMessage(item.message)));
     }
     panel.append(outcomes);
@@ -566,6 +575,10 @@ function renderConclusion(current, active, assessment) {
   claims.replaceChildren();
   hypotheses.replaceChildren();
   if (current.afirmacoes?.length) claims.append(el("h3", "Claims and evidence"));
+  if (current.unsupported_claims) {
+    claims.append(el("p", current.unsupported_claims +
+      " claim(s) were discarded because the cited evidence did not mention them.", "muted"));
+  }
   for (const claim of current.afirmacoes || []) {
     const item = el("div", undefined, "cti-analysis-item");
     item.append(el("p", claim.texto));
