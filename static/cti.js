@@ -50,7 +50,7 @@ const englishLabels = new Map(Object.entries({
   "Correspondência textual": "Text match",
   "Atribuição da fonte": "Source attribution",
   "Indexada · a conferir": "Indexed · needs review",
-  "Menção textual verificada": "Verified mention",
+  "Menção textual verificada": "Text match confirmed",
   "Coocorrência · a conferir": "Co-occurrence · needs review",
   "Síntese automática · a conferir": "Automated assessment · needs review",
   "Documentada pela fonte": "Documented by source",
@@ -395,6 +395,10 @@ function inspect(node) {
       el("p", (outgoing ? "→ " : "← ") + entityLabel(other.value, other.kind), "muted"),
       el("p", [label(relation.source), relation.date && (relation.date_kind ? label(relation.date_kind) + " " : "") + relation.date]
         .filter(Boolean).join(" · "), "muted"));
+    if (relation.admiralty) {
+      article.append(el("p", "Admiralty · " + relation.admiralty.code + " (source reliability " +
+        relation.admiralty.reliability + ", info credibility " + relation.admiralty.credibility + ")", "muted"));
+    }
     if (relation.context) article.append(el("p", "Context · " + label(relation.context), "muted"));
     if (relation.model) article.append(el("p", "Model " + relation.model, "muted"));
     if (relation.activity_date) article.append(el("p", "Activity observed on " + relation.activity_date, "muted"));

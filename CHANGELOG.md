@@ -30,6 +30,11 @@ semantic versioning once releases are tagged.
 - LLM input sanitization: source excerpts are stripped of obvious prompt-injection patterns and
   output delimiters and capped per excerpt before being sent to the model, and the case logs how
   many excerpts were sanitized.
+- Admiralty grading per evidence: a source-reliability letter (A–F) from a versioned, editable
+  `reliability.json` plus an information-credibility number (1–6) derived from the evidence's
+  confidence, shown as a code (e.g. B2) in the evidence panel; unknown sources default to F/6.
+  The "verified mention" qualifier is renamed "Text match confirmed" to make clear it confirms the
+  term is present, not that the claim is true.
 - `LICENSE` (MIT), `SECURITY.md`, `CONTRIBUTING.md`, and a `CHANGELOG.md`.
 - GitHub Actions CI running `python3 -I -m unittest -q` on Python 3.12, offline.
 - Dependabot configuration for Docker base images and GitHub Actions.
