@@ -25,6 +25,7 @@ WEB_SEARCH_SOURCES = frozenset({
 })
 REPUTATION_SOURCES = frozenset({"VirusTotal", "Shodan", "ThreatFox", "Ransomware.live"})
 LLM_SOURCES = frozenset({"OpenCode"})
+ALL_SOURCES = LOCAL_SOURCES | CATALOG_SOURCES | WEB_SEARCH_SOURCES | REPUTATION_SOURCES | LLM_SOURCES
 
 
 def source_class(source):

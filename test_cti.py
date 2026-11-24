@@ -45,8 +45,8 @@ class ThreatIntelligence(unittest.TestCase):
         self.addCleanup(manager.__exit__, None, None, None)
         return value
 
-    def collect(self, seeds):
-        case_id = Client.call("/api/cti", {"seeds": seeds}, 201)["id"]
+    def collect(self, seeds, tlp="CLEAR", **prefs):
+        case_id = Client.call("/api/cti", {"seeds": seeds, "tlp": tlp, **prefs}, 201)["id"]
         path = f"/api/cti/{case_id}"
         return path, self.wait(path)
 
@@ -476,3 +476,41 @@ class ThreatIntelligence(unittest.TestCase):
         self.assertEqual(found[0]["source"], "CIRCL OSINT")
         self.assertTrue(found[0]["reference"].endswith(".json"))
         self.assertNotIn("192.0.2.80", fetch.call_args.args[0])
+
+    def test_red_case_runs_only_local_sources_and_makes_no_external_call(self):
+        import collectors
+
+        self.enter(patch.object(cti, "configured_sources", return_value=[
+            "MISP local", "Histórico local", "CIRCL OSINT", "Busca web", "OpenCode"]))
+        for owner, attr in [(cti, "circl_matches"), (cti, "assess_with_model"),
+                            (cti, "attack_bundle"), (collectors, "web_search")]:
+            self.enter(patch.object(owner, attr, side_effect=AssertionError(f"{attr} must not run under RED")))
+        _, case = self.collect("143.198.64.151", tlp="RED")
+        self.assertIn(case["status"], ("done", "empty"))
+        self.assertEqual({q["source"] for q in case["queries"]}, {"MISP local", "Histórico local"})
+        self.assertFalse(any(row["source"] == "OpenCode" for row in case["relations"]))
+
+    def test_amber_case_skips_web_search_and_hosted_llm(self):
+        import collectors
+
+        self.enter(patch.object(cti, "configured_sources", return_value=["MISP local", "Busca web", "OpenCode"]))
+        self.enter(patch.object(collectors, "web_search", side_effect=AssertionError("web search must not run under AMBER")))
+        self.enter(patch.object(cti, "assess_with_model", side_effect=AssertionError("hosted LLM must not run under AMBER")))
+        _, case = self.collect("acme-campaign", tlp="AMBER")
+        self.assertIn(case["status"], ("done", "empty"))
+        self.assertEqual({q["source"] for q in case["queries"]}, {"MISP local"})
+        self.assertFalse(any(row["source"] == "OpenCode" for row in case["relations"]))
+
+    def test_assessment_endpoint_is_blocked_under_amber(self):
+        self.enter(patch.object(cti, "configured_sources", return_value=["MISP local", "OpenCode"]))
+        path, _ = self.collect("acme-actor", tlp="AMBER")
+        error = Client.call(path + "/assessment", {}, 400)
+        self.assertEqual(error["error"], "Hosted model assessments are not allowed at this case's TLP.")
+
+    def test_query_log_records_terms_and_counts(self):
+        self.enter(patch.object(cti, "configured_sources", return_value=["MISP local", "Histórico local"]))
+        _, case = self.collect("143.198.64.151", tlp="CLEAR")
+        sources = {q["source"]: q for q in case["queries"]}
+        self.assertEqual(set(sources), {"MISP local", "Histórico local"})
+        self.assertIn("143.198.64.151", sources["Histórico local"]["terms"])
+        self.assertGreaterEqual(sources["Histórico local"]["result_count"], 1)

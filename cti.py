@@ -448,11 +448,23 @@ def initialize(conn):
             kind TEXT NOT NULL, value TEXT NOT NULL, relation_id INTEGER NOT NULL REFERENCES cti_relations(id),
             PRIMARY KEY(kind, value, relation_id)
         );
+        CREATE TABLE IF NOT EXISTS cti_queries (
+            id INTEGER PRIMARY KEY, case_id INTEGER NOT NULL REFERENCES cti_cases(id),
+            source TEXT NOT NULL, terms TEXT NOT NULL, result_count INTEGER NOT NULL, created_at TEXT NOT NULL
+        );
         CREATE INDEX IF NOT EXISTS cti_relations_case ON cti_relations(case_id, id);
         CREATE INDEX IF NOT EXISTS cti_entity_relation ON cti_entity_index(relation_id);
+        CREATE INDEX IF NOT EXISTS cti_queries_case ON cti_queries(case_id, id);
     """)
     if "found" not in {row[1] for row in conn.execute("PRAGMA table_info(cti_events)")}:
         conn.execute("ALTER TABLE cti_events ADD COLUMN found INTEGER")
+    case_columns = {row[1] for row in conn.execute("PRAGMA table_info(cti_cases)")}
+    if "tlp" not in case_columns:
+        conn.execute("ALTER TABLE cti_cases ADD COLUMN tlp TEXT NOT NULL DEFAULT 'AMBER'")
+        # Cases created before TLP existed keep their prior, unrestricted behavior.
+        conn.execute("UPDATE cti_cases SET tlp='CLEAR'")
+    if "source_prefs" not in case_columns:
+        conn.execute("ALTER TABLE cti_cases ADD COLUMN source_prefs TEXT NOT NULL DEFAULT '{}'")
     conn.execute("UPDATE cti_cases SET status='interrupted' WHERE status IN ('running','queued')")
 
     conn.execute("UPDATE cti_rounds SET status='interrupted' WHERE status='running'")
@@ -575,16 +587,32 @@ def snapshot(conn, case_id):
         raise LookupError("CTI case not found.")
     case = dict(row)
     case["seeds"] = json.loads(case["seeds"])
+    case["tlp"] = case.get("tlp") or "CLEAR"
+    try:
+        case["source_prefs"] = json.loads(case.get("source_prefs") or "{}")
+    except ValueError:
+        case["source_prefs"] = {}
     case["relations"] = [dict(json.loads(item["payload"]), id=item["id"], review=item["review"]) for item in
                          conn.execute("SELECT * FROM cti_relations WHERE case_id=? ORDER BY id", (case_id,))]
     case["events"] = [dict(item) for item in conn.execute(
         "SELECT * FROM cti_events WHERE case_id=? ORDER BY id", (case_id,))]
+    case["queries"] = [{"source": item["source"], "terms": json.loads(item["terms"]),
+                        "result_count": item["result_count"], "created_at": item["created_at"]}
+                       for item in conn.execute(
+                           "SELECT * FROM cti_queries WHERE case_id=? ORDER BY id", (case_id,))]
     return case
 
 
 def event(conn, case_id, source, status, message, timestamp, *, found=None):
     conn.execute("""INSERT INTO cti_events(case_id,source,status,message,created_at,found)
                  VALUES (?, ?, ?, ?, ?, ?)""", (case_id, source, status, message, timestamp, found))
+
+
+def log_query(conn, case_id, source, terms, result_count, timestamp):
+    # Audit trail of what was queried per case. Store seed/term values only, never API keys.
+    conn.execute("""INSERT INTO cti_queries(case_id,source,terms,result_count,created_at)
+                 VALUES (?, ?, ?, ?, ?)""",
+                 (case_id, source, json.dumps(list(terms), ensure_ascii=False), int(result_count), timestamp))
 
 
 def save(conn, case_id, rows):
