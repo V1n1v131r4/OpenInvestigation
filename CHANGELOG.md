@@ -19,6 +19,10 @@ semantic versioning once releases are tagged.
 
 ### Added
 
+- Per-case OPSEC controls: a TLP level (CLEAR/GREEN/AMBER/RED, default AMBER), passive mode, and
+  per-source overrides, enforced by a new `policy.py` so a case only queries the sources its level
+  allows (RED = local only; AMBER = local + catalogs, reputation opt-in, no web search or hosted
+  model). A per-case query log records what each source was sent and how many results it returned.
 - `LICENSE` (MIT), `SECURITY.md`, `CONTRIBUTING.md`, and a `CHANGELOG.md`.
 - GitHub Actions CI running `python3 -I -m unittest -q` on Python 3.12, offline.
 - Dependabot configuration for Docker base images and GitHub Actions.
