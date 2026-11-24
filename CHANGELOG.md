@@ -8,6 +8,9 @@ semantic versioning once releases are tagged.
 
 ### Changed
 
+- Replaced the OpenCode CLI with direct HTTP calls to OpenAI and Anthropic for the model
+  assessment. The Node runtime and the bundled model are gone from the image, removing the
+  free-quota failure mode; `OSINT_OPENCODE_*` and `OPENCODE_API_KEY` are no longer used.
 - Relaxed the model-assessment validation so a valid response is not rejected: a single real
   citation anywhere in the response is enough (hallucinated IDs are ignored rather than sinking the
   whole assessment), and the model's confidence number is coerced and clamped to 0–5 instead of

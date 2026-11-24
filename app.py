@@ -468,7 +468,7 @@ class Handler(BaseHTTPRequestHandler):
                         raise ValueError("Hosted model assessments are not allowed at this case's TLP.")
                     models = cti.assessment_models()
                     if not models:
-                        raise ValueError("OpenCode assessments are disabled in local configuration.")
+                        raise ValueError("Model assessments are disabled in local configuration.")
                     targets = case["seeds"]
                     payload, sanitized = cti.assessment_payload(targets, assessment_observations(case))
                     if not payload:

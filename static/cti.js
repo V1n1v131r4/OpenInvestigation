@@ -23,7 +23,7 @@ const englishLabels = new Map(Object.entries({
   "Parecer do caso": "Case assessment",
   "MISP local": "Local MISP",
   "Histórico local": "Local history",
-  "OpenCode": "OpenCode/LLM",
+  "OpenCode": "LLM assessment",
   "GitHub público": "Public GitHub",
   "Relatórios históricos na web": "Historical web reports",
   "Menções públicas": "Public mentions",

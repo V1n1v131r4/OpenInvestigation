@@ -7,12 +7,10 @@ import ipaddress
 import json
 import os
 import re
-import subprocess
 import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from tempfile import TemporaryDirectory
 from threading import Lock
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode, urlsplit
@@ -1847,11 +1845,7 @@ def assessment_payload(seeds, observations):
     return (payload if next_id > 1 else []), sanitized
 
 
-class OpenCodeFreeQuota(ProviderError):
-    pass
-
-
-MODEL_KEYS = {"openai": "OPENAI_API_KEY", "anthropic": "ANTHROPIC_API_KEY", "opencode": "OPENCODE_API_KEY"}
+MODEL_KEYS = {"openai": "OPENAI_API_KEY", "anthropic": "ANTHROPIC_API_KEY"}
 
 
 def assessment_models():
@@ -1865,55 +1859,66 @@ def assessment_models():
         model = os.getenv(variable, default).strip()
         if os.getenv(MODEL_KEYS[provider], "").strip() and model:
             models.append(model if model.startswith(provider + "/") else f"{provider}/{model}")
-    primary = os.getenv("OSINT_OPENCODE_MODEL", "").strip()
-    if primary:
-        models.extend([primary, *os.getenv("OSINT_OPENCODE_FALLBACK_MODELS", "").split(",")])
-    available = []
-    for model in dict.fromkeys(candidate.strip() for candidate in models):
-        if not model:
-            continue
-        provider = model.partition("/")[0]
-        if provider in ("openai", "anthropic") and not os.getenv(MODEL_KEYS[provider], "").strip():
-            continue
-        available.append(model)
-    return available[:6]
+    return models
 
 
-def opencode_failure(result, model):
-    # Match known failure classes without storing subprocess logs or provider responses.
-    diagnostic = (result.stderr or "")[-24_000:] + (result.stdout or "")[:4_000]
-    diagnostic = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", diagnostic).casefold()
-    if "standalone server exited" in diagnostic or "failed to start server" in diagnostic:
-        return "The OpenCode server exited before it was ready. Check the container runtime."
-    if re.search(r"free tier can only|free tier.*within opencode|freetiererror", diagnostic):
-        return "OpenCode Console denied access to this free model."
-    if model.startswith("opencode/") and re.search(
-            r"free usage (?:limit reached|exceeded)|used (?:all )?today.s free messages|free (?:tier )?quota (?:exceeded|exhausted)",
-            diagnostic):
-        reset = re.search(r"(?:reset(?:s)? (?:at|on)|retry after)\s+(\d{1,2}:\d{2}(?:\s*[ap]m)?)", diagnostic)
-        message = "OpenCode reported that the free quota is exhausted."
-        if reset:
-            message += f" Reset time reported by provider: {reset[1].upper()}."
-        return OpenCodeFreeQuota(message)
-    if re.search(r'http(?:/\d(?:\.\d)?)?\s+429\b|["]?(?:statuscode|status_code|status)["]?\s*[:=]\s*429\b',
-                 diagnostic):
-        return "The provider limited model usage (HTTP 429). The response did not indicate whether the quota is shared."
-    if re.search(r"rate.?limit|too many requests|resource exhausted|quota exceeded", diagnostic):
-        return "The provider reported a rate or quota limit for this model."
-    if re.search(r"api.?key|unauthorized|reconnect|authentication|not authenticated|\b401\b", diagnostic):
-        key_name = MODEL_KEYS.get(model.partition("/")[0])
-        return "The provider rejected authentication." + (f" Check {key_name} in .env." if key_name else "")
-    if re.search(r"providermodelnotfound|modelnotfound|model.{0,45}(unavailable|not found)|provider.{0,45}not found", diagnostic):
-        return f"Model {model} is unavailable in this OpenCode installation."
-    if re.search(r"enotfound|econnrefused|eai_again|network|unable to connect|failed to fetch|certificate|tls", diagnostic):
-        return "OpenCode could not reach the provider. Check DNS, HTTPS, and container network access."
-    if re.search(r"forbidden|\b403\b", diagnostic):
-        return "The provider returned HTTP 403. Check model access in OpenCode Console."
-    if re.search(r"invalid config|configinvalid|configfileerror|invalid configuration", diagnostic):
-        return "OpenCode rejected the assessment configuration."
-    if result.returncode:
-        return f"OpenCode exited with code {result.returncode} before returning an assessment."
-    return "OpenCode completed without returning assessment text."
+def llm_http(url, headers, body, source):
+    request = Request(url, data=json.dumps(body).encode(),
+                      headers={"User-Agent": egress.user_agent(), "Content-Type": "application/json",
+                               "Accept": "application/json", **headers})
+    try:
+        with build_opener(NoRedirects(), *egress.proxy_handlers()).open(request, timeout=90) as response:
+            content = response.read(4_000_001)
+    except HTTPError as error:
+        status = error.code
+        error.close()
+        if status in (401, 403):
+            raise ProviderError(f"{source}: authentication rejected (HTTP {status}). Check the API key.") from None
+        if status == 429:
+            raise ProviderError(f"{source}: rate or quota limit (HTTP 429).") from None
+        raise ProviderError(f"{source}: HTTP {status}.") from None
+    except (URLError, OSError):
+        raise ProviderError(f"{source}: connection failed.") from None
+    if len(content) > 4_000_000:
+        raise ProviderError(f"{source}: response exceeds the size limit.")
+    try:
+        result = json.loads(content)
+    except ValueError:
+        raise ProviderError(f"{source}: invalid JSON response.") from None
+    return result if isinstance(result, dict) else {}
+
+
+def call_model(model, prompt):
+    """Call the provider's chat API over HTTP and return the model's raw text response."""
+    provider, _, name = model.partition("/")
+    name = name or model
+    if provider == "openai":
+        key = os.getenv("OPENAI_API_KEY", "").strip()
+        if not key:
+            raise ProviderError("OpenAI: OPENAI_API_KEY is not set.")
+        data = llm_http("https://api.openai.com/v1/chat/completions", {"Authorization": "Bearer " + key},
+                        {"model": name, "messages": [{"role": "user", "content": prompt}],
+                         "response_format": {"type": "json_object"}}, "OpenAI")
+        choices = data.get("choices")
+        message = choices[0].get("message") if isinstance(choices, list) and choices and isinstance(choices[0], dict) else {}
+        text = message.get("content") if isinstance(message, dict) else None
+        if not isinstance(text, str):
+            raise ProviderError("OpenAI: unexpected response shape.")
+        return text
+    if provider == "anthropic":
+        key = os.getenv("ANTHROPIC_API_KEY", "").strip()
+        if not key:
+            raise ProviderError("Anthropic: ANTHROPIC_API_KEY is not set.")
+        data = llm_http("https://api.anthropic.com/v1/messages",
+                        {"x-api-key": key, "anthropic-version": "2023-06-01"},
+                        {"model": name, "max_tokens": 2048, "messages": [{"role": "user", "content": prompt}]},
+                        "Anthropic")
+        text = next((block.get("text") for block in array(data.get("content"))
+                     if isinstance(block, dict) and block.get("type") == "text"), None)
+        if not isinstance(text, str):
+            raise ProviderError("Anthropic: unexpected response shape.")
+        return text
+    raise ProviderError(f"{model}: unsupported provider (use openai/ or anthropic/).")
 
 
 def claim_supported(texto, excerpts):
@@ -1940,33 +1945,8 @@ def assess_with_model(payload, model):
         '"hipoteses":[{"texto":"hypothesis","favor":["E1"],"contra":[],"contexto":[]}]}.\n'
         + json.dumps(payload, ensure_ascii=False)
     )
-    with TemporaryDirectory(prefix="cti-opencode-") as directory:
-        folder = Path(directory)
-        (folder / "opencode.json").write_text(json.dumps({
-            "permissions": [{"action": "*", "resource": "*", "effect": "deny"}],
-            "policies": [{"action": action, "resource": "*", "effect": "deny"}
-                         for action in ("tool.use", "plugin.use")],
-        }), encoding="utf-8")
-        env = {"PATH": os.defpath + ":/usr/local/bin:/opt/homebrew/bin",
-               "HOME": directory, "XDG_CONFIG_HOME": directory, "XDG_DATA_HOME": directory,
-               "XDG_CACHE_HOME": directory, "XDG_STATE_HOME": directory, "NO_COLOR": "1"}
-        key_name = MODEL_KEYS.get(model.partition("/")[0])
-        if key_name and os.getenv(key_name, "").strip():
-            env[key_name] = os.environ[key_name].strip()
-        try:
-            result = subprocess.run(
-                ["opencode", "--standalone", "--print-logs", "--log-level", "error",
-                 "run", "--archived", "--model", model, "--", prompt],
-                cwd=folder, env=env, capture_output=True, text=True, errors="replace", timeout=75, check=False,
-            )
-        except FileNotFoundError:
-            raise ProviderError("OpenCode is unavailable in this installation.") from None
-        except subprocess.TimeoutExpired:
-            raise ProviderError("The model timed out.") from None
-        if result.returncode or not result.stdout.strip():
-            failure = opencode_failure(result, model)
-            raise failure if isinstance(failure, ProviderError) else ProviderError(failure)
-    output = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", result.stdout).strip()
+    output = call_model(model, prompt)
+    output = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", output).strip()
     output = re.sub(r"^```(?:json)?\s*|\s*```$", "", output, flags=re.I)
     try:
         parsed = json.loads(output)
@@ -1974,7 +1954,7 @@ def assess_with_model(payload, model):
         if not isinstance(summary, str) or not summary.strip():
             raise ValueError
     except (ValueError, TypeError):
-        raise ProviderError("OpenCode returned an assessment in an unexpected format.") from None
+        raise ProviderError("The model returned an assessment in an unexpected format.") from None
     # The confidence number is advisory (the code score is authoritative), so coerce and clamp it
     # instead of rejecting the whole assessment over a bad value.
     confidence = parsed.get("confianca")
@@ -2066,16 +2046,11 @@ def code_assessment(seeds, payload, score_result):
 
 def enrich_case(seeds, payload, models, on_attempt):
     failures = []
-    shared_quota = False
     for model in models:
-        if shared_quota and (model == "opencode/big-pickle" or
-                             model.startswith("opencode/") and model.endswith("-free")):
-            continue
         on_attempt(model, "running", "Generating an assessment from collected evidence.")
         try:
             summary, confidence, metadata = assess_with_model(payload, model)
         except ProviderError as error:
-            shared_quota = shared_quota or isinstance(error, OpenCodeFreeQuota)
             failures.append(f"{model}: {error}")
             on_attempt(model, "warning", str(error))
             continue
