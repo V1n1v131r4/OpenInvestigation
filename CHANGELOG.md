@@ -27,6 +27,9 @@ semantic versioning once releases are tagged.
   `OSINT_USER_AGENT` overrides the outbound User-Agent, and `OSINT_FETCH_ALLOW`/`OSINT_FETCH_DENY`
   allow or deny which hosts the page reader may fetch. The page reader keeps its public-IP pinning
   when no proxy is set and tunnels via CONNECT when one is.
+- LLM input sanitization: source excerpts are stripped of obvious prompt-injection patterns and
+  output delimiters and capped per excerpt before being sent to the model, and the case logs how
+  many excerpts were sanitized.
 - `LICENSE` (MIT), `SECURITY.md`, `CONTRIBUTING.md`, and a `CHANGELOG.md`.
 - GitHub Actions CI running `python3 -I -m unittest -q` on Python 3.12, offline.
 - Dependabot configuration for Docker base images and GitHub Actions.

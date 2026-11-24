@@ -124,6 +124,8 @@ Outbound requests are configurable:
 - `OSINT_USER_AGENT` — override the outbound User-Agent (neutral default).
 - `OSINT_FETCH_ALLOW` / `OSINT_FETCH_DENY` — comma-separated host suffixes that allow or deny which pages the reader may fetch.
 
+Source text sent to a model is treated as untrusted: excerpts are stripped of obvious prompt-injection patterns and output delimiters and capped per excerpt, and the case records how many were sanitized.
+
 ## Investigating cybercrime groups
 
 Enter a group name or alias, for example `LockBit`. MISP Galaxy distinguishes actor records from ransomware families. Official publications add advisories and law-enforcement references. A charging announcement is labeled as an allegation. Ransomware.live totals reflect claims recorded by the tracker and require independent corroboration.

@@ -242,8 +242,12 @@ def run_cti(case_id, seeds):
         with database() as conn:
             case = cti.snapshot(conn, case_id)
         targets = case["seeds"]
-        payload = cti.assessment_payload(targets, assessment_observations(case))
+        payload, sanitized = cti.assessment_payload(targets, assessment_observations(case))
         if payload:
+            if sanitized:
+                with database() as conn:
+                    cti.event(conn, case_id, "OpenCode", "warning",
+                              f"Sanitized {sanitized} excerpt(s) before sending them to the model.", now())
             _, error = cti_assessment(case_id, targets, payload, models)
             failed += error
         else:
@@ -433,9 +437,12 @@ class Handler(BaseHTTPRequestHandler):
                     if not models:
                         raise ValueError("OpenCode assessments are disabled in local configuration.")
                     targets = case["seeds"]
-                    payload = cti.assessment_payload(targets, assessment_observations(case))
+                    payload, sanitized = cti.assessment_payload(targets, assessment_observations(case))
                     if not payload:
                         raise ValueError("This case has no public evidence to assess yet.")
+                    if sanitized:
+                        cti.event(conn, case_id, "OpenCode", "warning",
+                                  f"Sanitized {sanitized} excerpt(s) before sending them to the model.", now())
                     reserve_cti(conn, case_id)
                     worker = retry_cti_assessment
                     job = case_id, targets, payload, models
