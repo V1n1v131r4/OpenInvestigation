@@ -6,6 +6,8 @@ from html import unescape
 from urllib.parse import urlencode
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
+import egress
+
 
 class NoRedirects(HTTPRedirectHandler):
     def redirect_request(self, *args, **kwargs):
@@ -14,11 +16,11 @@ class NoRedirects(HTTPRedirectHandler):
 
 def download(endpoint, headers=None, limit=2_000_000):
     request = Request(endpoint, headers={
-        "User-Agent": "OpenInvestigation/1.0 (interactive public-source research)",
+        "User-Agent": egress.user_agent(),
         "Accept": "application/json",
         **(headers or {}),
     })
-    with build_opener(NoRedirects()).open(request, timeout=10) as response:
+    with build_opener(NoRedirects(), *egress.proxy_handlers()).open(request, timeout=10) as response:
         data = response.read(limit + 1)
     if len(data) > limit:
         raise ValueError("Resposta acima do limite de tamanho.")

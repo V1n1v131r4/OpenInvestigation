@@ -7,6 +7,8 @@ import socket
 from html.parser import HTMLParser
 from urllib.parse import urljoin, urlsplit
 
+import egress
+
 
 def is_official_host(host, domain):
     return bool(host and (host == domain or host.endswith("." + domain)))
@@ -19,27 +21,37 @@ def public_address(host, port):
     return list(dict.fromkeys(addresses))
 
 
-def request(url):
+def request(url, deny_hosts=()):
     parsed = urlsplit(url)
     if (parsed.scheme != "https" or not parsed.hostname or parsed.username is not None
             or parsed.port is not None):
         raise ValueError("A coleta da referência requer HTTPS público sem porta personalizada.")
-    addresses = public_address(parsed.hostname, 443)
-    conn = http.client.HTTPSConnection(parsed.hostname, timeout=6)
+    if not egress.host_allowed(parsed.hostname, deny_hosts):
+        raise ValueError("Host recusado pela política de allow/deny de coleta.")
+    proxy = egress.proxy_url()
+    if proxy:
+        # Route through the proxy with a CONNECT tunnel; it resolves the host, so skip local IP
+        # pinning. The host was validated above before anything was sent.
+        endpoint = urlsplit(proxy)
+        conn = http.client.HTTPSConnection(endpoint.hostname, endpoint.port or 80, timeout=6)
+        conn.set_tunnel(parsed.hostname, 443)
+    else:
+        addresses = public_address(parsed.hostname, 443)
+        conn = http.client.HTTPSConnection(parsed.hostname, timeout=6)
 
-    def connect_pinned(_address, timeout=None, source_address=None):
-        # Resolve once, connect only to a validated IP, and retain the original TLS hostname.
-        for address in addresses[:3]:
-            try:
-                return socket.create_connection((address, 443), timeout, source_address)
-            except OSError as error:
-                last_error = error
-        raise last_error
+        def connect_pinned(_address, timeout=None, source_address=None):
+            # Resolve once, connect only to a validated IP, and retain the original TLS hostname.
+            for address in addresses[:3]:
+                try:
+                    return socket.create_connection((address, 443), timeout, source_address)
+                except OSError as error:
+                    last_error = error
+            raise last_error
 
-    conn._create_connection = connect_pinned
+        conn._create_connection = connect_pinned
     path = (parsed.path or "/") + ("?" + parsed.query if parsed.query else "")
     try:
-        conn.request("GET", path, headers={"User-Agent": "OpenInvestigation/1.0", "Accept": "text/html"})
+        conn.request("GET", path, headers={"User-Agent": egress.user_agent(), "Accept": "text/html"})
         with conn.getresponse() as response:
             if response.status in (301, 302, 303, 307, 308):
                 return response.status, response.getheader("Location"), ""
