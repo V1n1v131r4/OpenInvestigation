@@ -78,23 +78,72 @@ def admiralty(source, confidence):
     return {"reliability": reliability, "credibility": credibility, "code": f"{reliability}{credibility}"}
 
 
+# Prefix tags for indicators that are ambiguous with a hash or free text.
+SEED_PREFIXES = (
+    ("ua:", "User-Agent", None),
+    ("ja3:", "JA3", r"[a-fA-F0-9]{32}"),
+    ("jarm:", "JARM", r"[a-fA-F0-9]{62}"),
+    ("imphash:", "Imphash", r"[a-fA-F0-9]{32}"),
+    ("ssdeep:", "Ssdeep", r"\d{1,10}:[A-Za-z0-9/+]{3,200}:[A-Za-z0-9/+]{3,200}"),
+    ("file:", "Filename", r".{1,255}"),
+    ("mutex:", "Mutex", r".{1,255}"),
+)
+DOMAIN_PATTERN = r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z][A-Za-z0-9-]{1,62}"
+
+
+def defang(value):
+    """Normalize common defanged notations (hxxp, [.], [at], [:]) and keep callers free to store
+    the original. Applied only when it yields a recognized indicator, so free text is left alone."""
+    text = re.sub(r"^h(?:xx|XX)p", "http", value.strip())
+    for marker, real in (("[://]", "://"), ("(://)", "://"), ("[.]", "."), ("(.)", "."), ("{.}", "."),
+                         ("[dot]", "."), ("[:]", ":"), ("[at]", "@"), ("(at)", "@"), ("[@]", "@")):
+        text = text.replace(marker, real)
+    return text
+
+
 def indicator(value):
     value = value.strip()
-    if value.lower().startswith("ua:") and value[3:].strip():
-        return "User-Agent", value[3:].strip()
+    low = value.lower()
+    for prefix, kind, pattern in SEED_PREFIXES:
+        if low.startswith(prefix):
+            rest = value[len(prefix):].strip()
+            if not rest or (pattern and not re.fullmatch(pattern, rest)):
+                return None
+            return kind, rest.lower() if kind in ("JA3", "JARM", "Imphash") else rest
+    if "/" in value:
+        try:
+            network = ipaddress.ip_network(value, strict=False)
+            if network.num_addresses > 1:
+                return "CIDR", str(network)
+        except ValueError:
+            pass
     try:
         return "IP", ipaddress.ip_address(value).compressed
     except ValueError:
         pass
+    if re.fullmatch(r"[^@\s]{1,64}@" + DOMAIN_PATTERN, value):
+        return "Email", value.lower()
+    if re.fullmatch(r"CVE-\d{4}-\d{4,7}", value, re.I):
+        return "CVE", value.upper()
+    if re.fullmatch(r"AS\d{1,10}", value, re.I):
+        return "ASN", value.upper()
+    if re.fullmatch(r"0x[a-fA-F0-9]{40}", value):
+        return "Wallet", value.lower()
+    if re.fullmatch(r"\d{1,10}:[A-Za-z0-9/+]{3,200}:[A-Za-z0-9/+]{3,200}", value):
+        return "Ssdeep", value
+    if re.fullmatch(r"[a-fA-F0-9]{62}", value):
+        return "JARM", value.lower()
     if re.fullmatch(r"[a-fA-F0-9]{32}|[a-fA-F0-9]{40}|[a-fA-F0-9]{64}", value):
         return "Hash", value.lower()
+    if re.fullmatch(r"bc1[ac-hj-np-z02-9]{11,71}", value) or re.fullmatch(r"[13][a-km-zA-HJ-NP-Z1-9]{25,34}", value):
+        return "Wallet", value
     try:
         parsed = urlsplit(value)
         if parsed.scheme in ("https", "http") and parsed.hostname and parsed.username is None:
             return "URL", parsed._replace(netloc=parsed.netloc.lower(), fragment="").geturl()
     except ValueError:
         pass
-    if re.fullmatch(r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z][A-Za-z0-9-]{1,62}\.?", value):
+    if re.fullmatch(DOMAIN_PATTERN + r"\.?", value):
         return "Domínio", value.lower().rstrip(".")
     return None
 
@@ -109,11 +158,22 @@ def parse_seeds(value):
             continue
         if len(line) > 500:
             raise ValueError("Each entry may contain up to 500 characters.")
-        typed = indicator(line)
-        if not typed and ("://" in line or re.fullmatch(r"[\d.:]+", line)):
-            raise ValueError(f"Invalid indicator: {line}")
-        kind, normalized = typed or ("Termo", line)
-        seeds.append({"kind": kind, "value": normalized})
+        candidate = defang(line)
+        typed = indicator(candidate)
+        seed = None
+        if typed:
+            seed = {"kind": typed[0], "value": typed[1]}
+            if candidate != line:  # keep the analyst's original defanged form
+                seed["original"] = line
+        else:
+            typed = indicator(line)
+            if typed:
+                seed = {"kind": typed[0], "value": typed[1]}
+            elif "://" in line or re.fullmatch(r"[\d.:]+", line):
+                raise ValueError(f"Invalid indicator: {line}")
+            else:
+                seed = {"kind": "Termo", "value": line}
+        seeds.append(seed)
     seeds = list({match_key(row["kind"], row["value"]): row for row in seeds}.values())
     if not 1 <= len(seeds) <= 20:
         raise ValueError("Enter between 1 and 20 IOCs, group names, or search terms.")

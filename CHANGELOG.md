@@ -19,6 +19,10 @@ semantic versioning once releases are tagged.
 
 ### Added
 
+- New seed types with validators: email, CVE, ASN, CIDR, JA3, JARM, crypto wallet (BTC/ETH),
+  imphash, ssdeep, filename, and mutex, the ambiguous ones taking a prefix (`ja3:`, `jarm:`,
+  `imphash:`, `ssdeep:`, `file:`, `mutex:`). Defanged input (`hxxp`, `[.]`, `(.)`, `[:]`, `[at]`) is
+  normalized to a recognized indicator while the original form is kept.
 - Per-case OPSEC controls: a required TLP level (CLEAR/GREEN/AMBER/RED, no default), passive mode, and
   per-source overrides, enforced by a new `policy.py` so a case only queries the sources its level
   allows (RED = local only; AMBER = local + catalogs, reputation opt-in, no web search or hosted
