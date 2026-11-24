@@ -1975,21 +1975,29 @@ def assess_with_model(payload, model):
             raise ValueError
     except (ValueError, TypeError):
         raise ProviderError("OpenCode returned an assessment in an unexpected format.") from None
+    # The confidence number is advisory (the code score is authoritative), so coerce and clamp it
+    # instead of rejecting the whole assessment over a bad value.
     confidence = parsed.get("confianca")
-    if type(confidence) is not int or not 0 <= confidence <= 5:
-        raise ProviderError("The assessment must include an integer confidence score from 0 to 5.")
+    if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
+        try:
+            confidence = int(str(confidence).strip())
+        except (ValueError, TypeError, AttributeError):
+            confidence = 0
+    confidence = max(0, min(5, int(confidence)))
     citations = [item for entry in payload for item in entry["achados"]]
-    cited_ids = {value.upper() for value in re.findall(r"\bE[0-9]+\b", summary, re.I)}
-    supported = [item for item in citations if item["id"] in cited_ids]
-    if not supported or cited_ids != {item["id"] for item in supported}:
-        raise ProviderError("The assessment lacks valid citations for the case evidence.")
+    allowed_ids = {item["id"] for item in citations}
+    # Require at least one real citation anywhere in the response (summary or claims); ignore any
+    # hallucinated IDs rather than discarding an otherwise grounded assessment.
+    cited_ids = {value.upper() for value in re.findall(r"\bE[0-9]+\b", output, re.I)}
+    valid_cited = cited_ids & allowed_ids
+    if not valid_cited:
+        raise ProviderError("The assessment did not cite any of the case evidence.")
     metadata = {}
     justification = parsed.get("justificativa")
     if isinstance(justification, str):
         metadata["confidence_reason"] = justification.strip()[:1200]
-    allowed_ids = {item["id"] for item in citations}
     excerpt_by_id = {item["id"]: item.get("trecho", "") for item in citations}
-    referenced = set(cited_ids)
+    referenced = set(valid_cited)
     unsupported = 0
     for field, stances in [("afirmacoes", ("evidencias",)), ("hipoteses", ("favor", "contra", "contexto"))]:
         values = []

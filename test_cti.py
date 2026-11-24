@@ -271,7 +271,7 @@ class ThreatIntelligence(unittest.TestCase):
         self.assertEqual([arg[arg.index("--model") + 1] for arg in args],
                          ["opencode/big-pickle", *fallback.split(",")])
         self.assertEqual(len({arg[-1] for arg in args}), 1)
-        self.assertTrue(any(event["status"] == "warning" and "valid citations" in event["message"]
+        self.assertTrue(any(event["status"] == "warning" and "cite any of the case evidence" in event["message"]
                             for event in case["events"]))
 
     def test_explicit_free_quota_skips_fallback_in_same_free_tier(self):
@@ -325,16 +325,29 @@ class ThreatIntelligence(unittest.TestCase):
         self.assertEqual(claims, ["ARTEX is a public repository."])  # grounded claim kept
         self.assertEqual(metadata["unsupported_claims"], 1)          # ungrounded claim dropped and counted
 
-    def test_confidence_accepts_zero_and_rejects_out_of_range(self):
+    def test_confidence_is_coerced_and_clamped(self):
+        # The model number is advisory (the code score wins), so out-of-range values are clamped,
+        # not rejected — the assessment must still be usable.
         outputs = ['{"parecer":"E1 é insuficiente.","confianca":0}',
-                   '{"parecer":"E1 é insuficiente.","confianca":6}']
+                   '{"parecer":"E1 é insuficiente.","confianca":6}',
+                   '{"parecer":"E1 é insuficiente.","confianca":"3"}']
         self.enter(patch.object(cti.subprocess, "run", side_effect=[
             subprocess.CompletedProcess([], 0, output, "") for output in outputs
         ]))
         payload = [{"achados": [{"id": "E1"}]}]
         self.assertEqual(cti.assess_with_model(payload, "opencode/big-pickle")[1], 0)
-        with self.assertRaisesRegex(cti.ProviderError, "integer confidence score from 0 to 5"):
-            cti.assess_with_model(payload, "opencode/big-pickle")
+        self.assertEqual(cti.assess_with_model(payload, "opencode/big-pickle")[1], 5)
+        self.assertEqual(cti.assess_with_model(payload, "opencode/big-pickle")[1], 3)
+
+    def test_assessment_tolerates_a_hallucinated_citation(self):
+        # A single non-existent E-ID must not sink an otherwise grounded assessment.
+        output = '{"parecer":"The infrastructure is documented (E1) and elsewhere (E9).","confianca":3}'
+        self.enter(patch.object(cti.subprocess, "run",
+                                return_value=subprocess.CompletedProcess([], 0, output, "")))
+        summary, confidence, metadata = cti.assess_with_model([{"achados": [{"id": "E1", "trecho": "x"}]}],
+                                                              "opencode/big-pickle")
+        self.assertEqual(confidence, 3)
+        self.assertEqual({item["id"] for item in metadata["citations"]}, {"E1"})
 
     def test_audit_rounds_cross_case_and_stix_export(self):
         ip = "143.198.64.151"
@@ -766,6 +779,17 @@ class ThreatIntelligence(unittest.TestCase):
             self.assertNotIn(literal, cti_src, f"silent cut {literal} remains in cti.py")
         self.assertNotIn("== 1200", (root / "app.py").read_text(encoding="utf-8"))
         self.assertNotIn("[:8]", (root / "collectors.py").read_text(encoding="utf-8"))
+
+    def test_llm_failure_falls_back_to_code_assessment(self):
+        self.enter(patch.dict(os.environ, {"OSINT_OPENCODE_MODEL": "opencode/big-pickle"}))
+        self.enter(patch.object(cti, "configured_sources", return_value=["Histórico local", "OpenCode"]))
+        self.enter(patch.object(cti, "assess_with_model", side_effect=cti.ProviderError("model unavailable")))
+        _, case = self.collect("143.198.64.151", tlp="CLEAR")
+        assessment = case.get("assessment")
+        self.assertIsNotNone(assessment)
+        self.assertEqual(assessment["model"], "code")
+        self.assertIsInstance(assessment["case_confidence"], int)
+        self.assertTrue(any(event["source"] == "Parecer" for event in case["events"]))
 
     def test_red_case_gets_a_code_generated_assessment(self):
         _, case = self.collect("143.198.64.151", tlp="RED")
