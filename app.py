@@ -267,6 +267,7 @@ def run_cti(case_id, seeds):
         graded = [row for row in case["relations"] if row["source"] != "OpenCode" and row["review"] != "rejected"]
         cti.cluster_evidence(graded)
         score_result = cti.score(graded)
+        assessed = False
         if use_llm:
             if sanitized:
                 with database() as conn:
@@ -274,8 +275,10 @@ def run_cti(case_id, seeds):
                               f"Sanitized {sanitized} excerpt(s) before sending them to the model.", now())
             _, error = cti_assessment(case_id, targets, payload, models)
             failed += error
-        else:
-            # No hosted model (e.g. RED/AMBER or LLM disabled): write the code-generated assessment.
+            assessed = not error
+        if not assessed:
+            # No hosted model, or the model failed: fall back to the code-generated assessment so the
+            # case always has a written conclusion.
             with database() as conn:
                 cti.save(conn, case_id, list(cti.code_assessment(targets, payload, score_result)))
                 cti.event(conn, case_id, "Parecer", "done",

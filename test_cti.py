@@ -767,6 +767,17 @@ class ThreatIntelligence(unittest.TestCase):
         self.assertNotIn("== 1200", (root / "app.py").read_text(encoding="utf-8"))
         self.assertNotIn("[:8]", (root / "collectors.py").read_text(encoding="utf-8"))
 
+    def test_llm_failure_falls_back_to_code_assessment(self):
+        self.enter(patch.dict(os.environ, {"OSINT_OPENCODE_MODEL": "opencode/big-pickle"}))
+        self.enter(patch.object(cti, "configured_sources", return_value=["Histórico local", "OpenCode"]))
+        self.enter(patch.object(cti, "assess_with_model", side_effect=cti.ProviderError("model unavailable")))
+        _, case = self.collect("143.198.64.151", tlp="CLEAR")
+        assessment = case.get("assessment")
+        self.assertIsNotNone(assessment)
+        self.assertEqual(assessment["model"], "code")
+        self.assertIsInstance(assessment["case_confidence"], int)
+        self.assertTrue(any(event["source"] == "Parecer" for event in case["events"]))
+
     def test_red_case_gets_a_code_generated_assessment(self):
         _, case = self.collect("143.198.64.151", tlp="RED")
         assessment = case.get("assessment")
