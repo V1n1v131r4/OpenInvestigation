@@ -16,6 +16,7 @@ from urllib.parse import urlsplit
 
 import collectors
 import cti
+import policy
 
 STATIC = Path(__file__).parent / "static"
 DB = Path(os.getenv("OSINT_DATA_DIR", "./data")) / "cases.sqlite3"
@@ -80,7 +81,7 @@ def source_error(error):
     return type(reason).__name__
 
 
-def cti_stage(case_id, source, callback):
+def cti_stage(case_id, source, callback, terms=None):
     with database() as conn:
         cti.event(conn, case_id, source, "running", "Query started.", now())
     rows = []
@@ -104,42 +105,46 @@ def cti_stage(case_id, source, callback):
         if error:
             message += " Source unavailable: " + error
         cti.event(conn, case_id, source, "error" if error else "done", message, now(), found=len(rows))
+        if terms is not None:
+            cti.log_query(conn, case_id, source, terms, len(rows), now())
     return rows, bool(error)
 
 
 def submit_cti_iocs(case_id, seeds, entries, sources):
-    tasks = [COLLECTORS.submit(cti_stage, case_id, "MISP local", lambda: cti.misp_matches(seeds, entries))]
+    values = [seed["value"] for seed in seeds]
+    tasks = [COLLECTORS.submit(cti_stage, case_id, "MISP local", lambda: cti.misp_matches(seeds, entries), values)]
     has_iocs = any(seed["kind"] in ("IP", "URL", "Domínio", "Hash") for seed in seeds)
     if "Histórico local" in sources and has_iocs:
-        tasks.append(COLLECTORS.submit(cti_stage, case_id, "Histórico local", lambda: cti.local_history_matches(seeds)))
+        tasks.append(COLLECTORS.submit(cti_stage, case_id, "Histórico local", lambda: cti.local_history_matches(seeds), values))
     if "Relatórios históricos na web" in sources and has_iocs:
         tasks.append(COLLECTORS.submit(cti_stage, case_id, "Relatórios históricos na web",
-                                       lambda: cti.historical_web_matches(seeds)))
+                                       lambda: cti.historical_web_matches(seeds), values))
     if "CIRCL OSINT" in sources and has_iocs:
-        tasks.append(COLLECTORS.submit(cti_stage, case_id, "CIRCL OSINT", lambda: cti.circl_matches(seeds)))
+        tasks.append(COLLECTORS.submit(cti_stage, case_id, "CIRCL OSINT", lambda: cti.circl_matches(seeds), values))
     if "ThreatDefence" in sources and (has_iocs or any(seed["kind"] == "User-Agent" for seed in seeds)):
-        tasks.append(COLLECTORS.submit(cti_stage, case_id, "ThreatDefence", lambda: cti.threatdefence_matches(seeds)))
+        tasks.append(COLLECTORS.submit(cti_stage, case_id, "ThreatDefence", lambda: cti.threatdefence_matches(seeds), values))
     if has_iocs:
         for source, (variable, collector) in cti.authenticated_sources().items():
             if source in sources:
                 tasks.append(COLLECTORS.submit(cti_stage, case_id, source,
-                                               lambda collector=collector, key=os.environ[variable]: collector(seeds, key)))
+                                               lambda collector=collector, key=os.environ[variable]: collector(seeds, key), values))
     return tasks
 
 
 def submit_cti_mentions(case_id, terms, sources):
+    values = [seed["value"] for seed in terms]
     collectors_by_source = {"Busca web": cti.keyword_matches, "GitHub público": cti.github_mentions,
                             "MISP Galaxy": cti.galaxy_matches,
                             "Official cybercrime publications": cti.official_cybercrime_mentions}
-    tasks = [COLLECTORS.submit(cti_stage, case_id, source, lambda collect=collect: collect(terms))
+    tasks = [COLLECTORS.submit(cti_stage, case_id, source, lambda collect=collect: collect(terms), values)
              for source, collect in collectors_by_source.items() if source in sources]
     tasks.extend(COLLECTORS.submit(cti_stage, case_id, source,
-                                  lambda source=source: cti.open_index_mentions(terms, source))
+                                  lambda source=source: cti.open_index_mentions(terms, source), values)
                  for source in ("Mwmbl", "Arquivo.pt") if source in sources)
     if "Ransomware.live" in sources:
         key = os.environ["RANSOMWARE_LIVE_API_KEY"].strip()
         tasks.append(COLLECTORS.submit(cti_stage, case_id, "Ransomware.live",
-                                       lambda: cti.ransomware_live_matches(terms, key)))
+                                       lambda: cti.ransomware_live_matches(terms, key), values))
     return tasks
 
 
@@ -147,7 +152,20 @@ def cti_assessment(case_id, targets, payload, models):
     def attempt(model, status, message):
         with database() as conn:
             cti.event(conn, case_id, "OpenCode · " + model, status, message, now())
-    return cti_stage(case_id, "OpenCode", lambda: cti.enrich_case(targets, payload, models, attempt))
+    return cti_stage(case_id, "OpenCode", lambda: cti.enrich_case(targets, payload, models, attempt),
+                     [seed["value"] for seed in targets])
+
+
+def case_policy(conn, case_id):
+    row = conn.execute("SELECT tlp, source_prefs FROM cti_cases WHERE id=?", (case_id,)).fetchone()
+    tlp = policy.normalize_tlp(row["tlp"] if row else "")
+    try:
+        prefs = json.loads(row["source_prefs"]) if row and row["source_prefs"] else {}
+    except ValueError:
+        prefs = {}
+    passive = bool(prefs.get("passive"))
+    overrides = prefs.get("overrides") if isinstance(prefs.get("overrides"), dict) else {}
+    return tlp, passive, overrides
 
 
 def run_cti(case_id, seeds):
@@ -155,10 +173,14 @@ def run_cti(case_id, seeds):
         conn.execute("UPDATE cti_cases SET status='running' WHERE id=?", (case_id,))
         entries = [json.loads(row["payload"]) for row in conn.execute("SELECT payload FROM cti_misp")]
         round_id = cti.begin_round(conn, case_id, now())
-    sources = cti.configured_sources()
+        tlp, passive, overrides = case_policy(conn, case_id)
+    available = cti.configured_sources()
+    sources = policy.effective_sources(available, tlp, passive, overrides)
     tasks = submit_cti_iocs(case_id, seeds, entries, sources)
     terms = [seed for seed in seeds if seed["kind"] in ("Termo", "Grupo")]
-    missing_search = bool(terms) and os.getenv("OSINT_WEB", "1") == "1" and "Busca web" not in sources
+    missing_search = (bool(terms) and os.getenv("OSINT_WEB", "1") == "1"
+                      and policy.permits_source("Busca web", tlp, passive, overrides)
+                      and "Busca web" not in available)
     if terms:
         tasks.extend(submit_cti_mentions(case_id, terms, sources))
     if missing_search:
@@ -171,7 +193,8 @@ def run_cti(case_id, seeds):
         observations.extend(rows)
         failed += error
     if any(row["source"] in cti.WEB_MENTION_SOURCES for row in observations):
-        verified, error = cti_stage(case_id, "Verificação web", lambda: cti.verified_mentions(observations))
+        verified, error = cti_stage(case_id, "Verificação web", lambda: cti.verified_mentions(observations),
+                                    sorted({row["origin"] for row in observations if row["source"] in cti.WEB_MENTION_SOURCES}))
         observations.extend(verified)
         failed += error
         pivots = cti.automatic_pivots(seeds, verified)
@@ -190,7 +213,8 @@ def run_cti(case_id, seeds):
                 new_rows.extend(rows)
                 failed += error
             if any(row["source"] in cti.WEB_MENTION_SOURCES for row in new_rows):
-                checked, error = cti_stage(case_id, "Verificação web", lambda: cti.verified_mentions(new_rows))
+                checked, error = cti_stage(case_id, "Verificação web", lambda: cti.verified_mentions(new_rows),
+                                           sorted({row["origin"] for row in new_rows if row["source"] in cti.WEB_MENTION_SOURCES}))
                 observations.extend(checked)
                 failed += error
             observations.extend(new_rows)
@@ -202,13 +226,15 @@ def run_cti(case_id, seeds):
         entities = list({(seed["kind"], seed["value"].casefold()): seed for seed in context
                          if seed["kind"] in ("Termo", "Grupo", "Campanha", "Malware", "Ferramenta", "Alias")}.values())[:25]
         if entities:
-            rows, error = cti_stage(case_id, "MITRE ATT&CK", lambda: cti.attack_matches(entities, cti.attack_bundle()))
+            rows, error = cti_stage(case_id, "MITRE ATT&CK", lambda: cti.attack_matches(entities, cti.attack_bundle()),
+                                    [entity["value"] for entity in entities])
             failed += error
             observations.extend(rows)
             groups = list({row["target"]: {"kind": "Grupo", "value": row["target"]} for row in rows
                            if row["kind"] == "Grupo" and row["relationship"] == "Identificado no catálogo"}.values())
             if groups and "Menções públicas" in sources:
-                mentions, error = cti_stage(case_id, "Menções públicas", lambda: cti.public_mentions(groups))
+                mentions, error = cti_stage(case_id, "Menções públicas", lambda: cti.public_mentions(groups),
+                                            [group["value"] for group in groups])
                 observations.extend(mentions)
                 failed += error
     models = cti.assessment_models()
@@ -360,11 +386,19 @@ class Handler(BaseHTTPRequestHandler):
             if not parts:
                 seeds = cti.parse_seeds(data.get("seeds"))
                 title = field(data, "title", 150, required=False) or seeds[0]["value"][:150]
-                case_id = conn.execute("INSERT INTO cti_cases VALUES (NULL, ?, ?, 'idle', ?)",
-                                       (title, json.dumps(seeds), now())).lastrowid
+                tlp = data.get("tlp")
+                if tlp not in policy.TLP_LEVELS:
+                    raise ValueError("Select a TLP level (CLEAR, GREEN, AMBER, or RED) before starting.")
+                raw_overrides = data.get("sources") if isinstance(data.get("sources"), dict) else {}
+                overrides = {key: bool(value) for key, value in raw_overrides.items() if key in policy.ALL_SOURCES}
+                prefs = {"passive": bool(data.get("passive")), "overrides": overrides}
+                case_id = conn.execute(
+                    "INSERT INTO cti_cases (title, seeds, status, created_at, tlp, source_prefs) "
+                    "VALUES (?, ?, 'idle', ?, ?, ?)",
+                    (title, json.dumps(seeds), now(), tlp, json.dumps(prefs, ensure_ascii=False))).lastrowid
                 reserve_cti(conn, case_id)
                 job = case_id, seeds
-                response = {"id": case_id}
+                response = {"id": case_id, "tlp": tlp}
             elif parts == ["misp"]:
                 raw = data.get("events")
                 if not isinstance(raw, list) or not 1 <= len(raw) <= 100:
@@ -391,6 +425,10 @@ class Handler(BaseHTTPRequestHandler):
                 elif parts[1] == "assessment":
                     if case["status"] in ("queued", "running"):
                         raise ValueError("Wait for the current investigation to finish.")
+                    prefs = case.get("source_prefs") or {}
+                    if not policy.permits_hosted_llm(case.get("tlp"), bool(prefs.get("passive")),
+                                                     prefs.get("overrides") if isinstance(prefs.get("overrides"), dict) else {}):
+                        raise ValueError("Hosted model assessments are not allowed at this case's TLP.")
                     models = cti.assessment_models()
                     if not models:
                         raise ValueError("OpenCode assessments are disabled in local configuration.")
