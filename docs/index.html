@@ -4,16 +4,16 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>OpenInvestigation — self-hosted threat intelligence with auditable confidence</title>
-<meta name="description" content="OpenInvestigation is a self-hosted threat-investigation workspace. It correlates public evidence, keeps you in control of what leaves your machine (per-case TLP), and produces a 0–5 confidence score computed in code — not guessed by a model.">
+<meta name="description" content="OpenInvestigation is a self-hosted threat-investigation workspace for analysts. 25+ graded sources, Admiralty A–F × 1–6 on every claim, a 0–5 confidence computed in code, and an LLM that writes the assessment — never the verdict.">
 <meta property="og:type" content="website">
 <meta property="og:title" content="OpenInvestigation">
-<meta property="og:description" content="Self-hosted threat intelligence with auditable confidence. Per-case TLP, independent-origin scoring in code, 25+ public sources, STIX 2.1. Standard-library Python, no bundled model.">
+<meta property="og:description" content="Self-hosted threat intelligence with auditable confidence. 25+ graded sources, Admiralty grading, independence-capped 0–5 scoring in code, LLM assessment with cited evidence and competing hypotheses. Standard-library Python.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230a0d12'/%3E%3Cpath d='M7 11l5 5-5 5' fill='none' stroke='%2335d07f' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cline x1='15' y1='22' x2='24' y2='22' stroke='%2335d07f' stroke-width='2.4' stroke-linecap='round'/%3E%3C/svg%3E">
 <style>
   :root{
     --bg:#0a0d12; --bg-raised:#111722; --bg-soft:#0e141d; --border:#1e2633;
     --text:#e6edf3; --muted:#8b97a7; --accent:#35d07f; --accent-soft:rgba(53,208,127,.12);
-    --amber:#f5b450; --red:#f2685f; --radius:14px; --maxw:1060px;
+    --amber:#f5b450; --red:#f2685f; --blue:#9fd0ff; --radius:14px; --maxw:1060px;
     --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
     --sans:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
   }
@@ -33,11 +33,11 @@
   .nav .wrap{display:flex;align-items:center;gap:20px;height:60px}
   .brand{display:flex;align-items:center;gap:9px;font-weight:700;letter-spacing:-.01em}
   .brand .mark{width:22px;height:22px;flex:none}
-  .nav nav{margin-left:auto;display:flex;gap:22px;align-items:center}
-  .nav nav a{color:var(--muted);font-size:.93rem;font-weight:500}
+  .nav nav{margin-left:auto;display:flex;gap:20px;align-items:center}
+  .nav nav a{color:var(--muted);font-size:.92rem;font-weight:500}
   .nav nav a:hover{color:var(--text);text-decoration:none}
   .nav .ghl{color:var(--text)}
-  @media(max-width:680px){.nav nav a.hide-sm{display:none}}
+  @media(max-width:720px){.nav nav a.hide-sm{display:none}}
 
   /* hero */
   .hero{padding:84px 0 56px;position:relative}
@@ -49,7 +49,7 @@
   .eyebrow .dot{width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px var(--accent)}
   h1{font-size:clamp(2.1rem,5.2vw,3.5rem);line-height:1.08;letter-spacing:-.025em;margin:0 0 18px;font-weight:800}
   h1 .accent{color:var(--accent)}
-  .lede{font-size:clamp(1.05rem,2.2vw,1.28rem);color:var(--muted);max-width:640px;margin:0 0 30px}
+  .lede{font-size:clamp(1.05rem,2.2vw,1.28rem);color:var(--muted);max-width:660px;margin:0 0 30px}
   .cta{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
   .btn{display:inline-flex;align-items:center;gap:8px;font-weight:600;font-size:.98rem;
     padding:12px 20px;border-radius:10px;border:1px solid transparent;cursor:pointer}
@@ -59,14 +59,15 @@
   .btn-ghost:hover{text-decoration:none;border-color:var(--accent);color:var(--accent)}
 
   /* terminal */
-  .term{margin-top:38px;background:var(--bg-soft);border:1px solid var(--border);border-radius:var(--radius);
+  .term{background:var(--bg-soft);border:1px solid var(--border);border-radius:var(--radius);
     overflow:hidden;box-shadow:0 30px 60px -30px rgba(0,0,0,.6)}
+  .hero .term{margin-top:38px}
   .term-bar{display:flex;align-items:center;gap:7px;padding:11px 14px;border-bottom:1px solid var(--border);background:#0c121b}
   .term-bar i{width:11px;height:11px;border-radius:50%;background:#2a3444;display:inline-block}
   .term-bar i:nth-child(1){background:#f2685f66}.term-bar i:nth-child(2){background:#f5b45066}.term-bar i:nth-child(3){background:#35d07f66}
   .term-bar span{margin-left:auto;font-family:var(--mono);font-size:.76rem;color:var(--muted)}
   .term pre{margin:0;padding:18px 16px;font-family:var(--mono);font-size:.9rem;line-height:1.75;overflow-x:auto;color:#cfe7d8}
-  .term .p{color:var(--accent)}.term .c{color:var(--muted)}.term .o{color:#9fd0ff}
+  .term .p{color:var(--accent)}.term .c{color:var(--muted)}.term .o{color:var(--blue)}
   .copy{position:relative}
   .copy button{position:absolute;top:10px;right:10px;font-family:var(--mono);font-size:.72rem;color:var(--muted);
     background:#0c121b;border:1px solid var(--border);border-radius:7px;padding:4px 9px;cursor:pointer}
@@ -74,7 +75,8 @@
 
   /* sections */
   section{padding:56px 0}
-  .sec-head{max-width:680px;margin:0 0 34px}
+  .alt{background:var(--bg-soft);border-top:1px solid var(--border);border-bottom:1px solid var(--border)}
+  .sec-head{max-width:700px;margin:0 0 34px}
   .sec-head h2{font-size:clamp(1.5rem,3.2vw,2.05rem);letter-spacing:-.02em;margin:0 0 10px;font-weight:800}
   .sec-head p{color:var(--muted);margin:0;font-size:1.02rem}
   .kicker{font-family:var(--mono);font-size:.78rem;color:var(--accent);text-transform:uppercase;letter-spacing:.14em;margin:0 0 12px}
@@ -87,6 +89,50 @@
   .card h3{margin:0 0 8px;font-size:1.06rem;display:flex;align-items:center;gap:9px}
   .card h3 .ic{width:22px;height:22px;flex:none;color:var(--accent)}
   .card p{margin:0;color:var(--muted);font-size:.94rem}
+
+  /* split */
+  .split{display:grid;gap:20px;grid-template-columns:1.05fr .95fr;align-items:start}
+  @media(max-width:820px){.split{grid-template-columns:1fr}}
+
+  /* chips / sources tiers */
+  .chips{display:flex;flex-wrap:wrap;gap:8px}
+  .chip{font-family:var(--mono);font-size:.82rem;color:var(--text);background:var(--bg-soft);
+    border:1px solid var(--border);border-radius:8px;padding:5px 10px}
+  .card .chip{background:#0c121b}
+  .tier .tag{font-family:var(--mono);font-size:.72rem;text-transform:uppercase;letter-spacing:.1em;
+    padding:3px 9px;border-radius:999px;display:inline-block;margin-bottom:10px}
+  .tier.local .tag{color:var(--red);background:rgba(242,104,95,.1);border:1px solid rgba(242,104,95,.3)}
+  .tier.catalog .tag{color:var(--amber);background:rgba(245,180,80,.1);border:1px solid rgba(245,180,80,.3)}
+  .tier.web .tag{color:var(--accent);background:var(--accent-soft);border:1px solid rgba(53,208,127,.3)}
+  .tier h3{margin:0 0 4px;font-size:1.02rem}
+  .tier .egress{color:var(--muted);font-size:.88rem;margin:0 0 14px}
+
+  /* admiralty */
+  .axis{background:var(--bg-raised);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:16px}
+  .axis h3{margin:0 0 4px;font-size:1rem}
+  .axis .sub{color:var(--muted);font-size:.86rem;margin:0 0 14px}
+  .scale{display:grid;gap:7px}
+  .scale div{display:flex;gap:11px;align-items:baseline;font-size:.9rem}
+  .scale b{font-family:var(--mono);color:var(--accent);min-width:1.9em}
+  .scale.cred b{color:var(--blue)}
+  .scale span{color:var(--muted)}
+  .codes{display:flex;flex-wrap:wrap;gap:10px;margin-top:4px}
+  .code{background:var(--bg-raised);border:1px solid var(--border);border-radius:11px;padding:12px 14px;min-width:150px;flex:1}
+  .code .k{font-family:var(--mono);font-size:1.25rem;font-weight:700;letter-spacing:.02em}
+  .code .k .r{color:var(--accent)}.code .k .c{color:var(--blue)}
+  .code small{display:block;color:var(--muted);font-size:.82rem;margin-top:3px}
+
+  /* score ladder */
+  .ladder{list-style:none;margin:0;padding:0;display:grid;gap:9px}
+  .ladder li{display:flex;gap:13px;align-items:center;background:var(--bg-raised);border:1px solid var(--border);
+    border-radius:11px;padding:11px 14px;font-size:.92rem;color:var(--muted)}
+  .ladder .s{font-family:var(--mono);font-weight:700;width:30px;height:30px;border-radius:8px;flex:none;
+    display:grid;place-items:center;color:#06240f;font-size:1rem}
+  .ladder .s5,.ladder .s4{background:var(--accent)}
+  .ladder .s3{background:var(--amber)}
+  .ladder .s2{background:#3a4a5e;color:var(--text)}
+  .ladder .s0{background:var(--red);color:#2a0b09}
+  .ladder b{color:var(--text);font-weight:600}
 
   /* steps */
   .steps{counter-reset:s;display:grid;gap:14px}
@@ -101,14 +147,8 @@
   @media(max-width:720px){.tlp{grid-template-columns:repeat(2,1fr)}}
   .tlp div{border:1px solid var(--border);border-radius:11px;padding:14px;background:var(--bg-raised);font-size:.9rem}
   .tlp b{font-family:var(--mono);display:block;margin-bottom:5px}
-  .tlp .red b{color:var(--red)}.tlp .amber b{color:var(--amber)}.tlp .green b{color:var(--accent)}.tlp .clear b{color:#9fd0ff}
+  .tlp .red b{color:var(--red)}.tlp .amber b{color:var(--amber)}.tlp .green b{color:var(--accent)}.tlp .clear b{color:var(--blue)}
   .tlp span{color:var(--muted)}
-
-  /* sources */
-  .chips{display:flex;flex-wrap:wrap;gap:9px}
-  .chip{font-family:var(--mono);font-size:.82rem;color:var(--text);background:var(--bg-raised);
-    border:1px solid var(--border);border-radius:8px;padding:6px 11px}
-  .chip:hover{border-color:var(--accent);color:var(--accent)}
 
   /* cta band */
   .band{background:linear-gradient(180deg,var(--bg-soft),var(--bg));border-top:1px solid var(--border);border-bottom:1px solid var(--border);text-align:center}
@@ -130,10 +170,10 @@
       OpenInvestigation
     </a>
     <nav>
-      <a class="hide-sm" href="#features">Features</a>
-      <a class="hide-sm" href="#how">How it works</a>
       <a class="hide-sm" href="#sources">Sources</a>
-      <a href="#quickstart">Quickstart</a>
+      <a href="#grading">Grading</a>
+      <a href="#assessment">Assessment</a>
+      <a class="hide-sm" href="#quickstart">Quickstart</a>
       <a class="ghl" href="https://github.com/V1n1v131r4/OpenInvestigation">GitHub ↗</a>
     </nav>
   </div>
@@ -142,9 +182,9 @@
 <main id="top">
   <section class="hero">
     <div class="wrap">
-      <span class="eyebrow"><span class="dot"></span> Self-hosted · MIT · standard-library Python</span>
+      <span class="eyebrow"><span class="dot"></span> Built for analysts · self-hosted · MIT</span>
       <h1>Threat intelligence with <span class="accent">confidence you can audit</span>.</h1>
-      <p class="lede">OpenInvestigation correlates public evidence about IOCs, actors, malware and campaigns — and keeps you in control of what leaves your machine. The 0–5 confidence is computed in code from independent sources, not guessed by a model.</p>
+      <p class="lede">OpenInvestigation pulls public evidence on IOCs, actors, malware and campaigns from 25+ graded sources, grades every claim on the Admiralty scale, and derives a 0–5 confidence <em>in code</em> — capped by how many independent origins agree. The model writes the assessment; it never sets the score.</p>
       <div class="cta">
         <a class="btn btn-primary" href="#quickstart">Get started</a>
         <a class="btn btn-ghost" href="https://github.com/V1n1v131r4/OpenInvestigation">View on GitHub ↗</a>
@@ -162,25 +202,122 @@
     </div>
   </section>
 
-  <section id="features">
+  <!-- SOURCES -->
+  <section id="sources">
     <div class="wrap">
       <div class="sec-head">
-        <p class="kicker">Why it's different</p>
-        <h2>Rigor and privacy, built in</h2>
-        <p>Not another aggregator. The analytic rigor and OPSEC controls are the product.</p>
+        <p class="kicker">Sources</p>
+        <h2>25+ sources, and you control what leaves the box</h2>
+        <p>Every source is classed by what it does to your indicator. The per-case TLP decides which classes run, and a query log records exactly what each one received.</p>
       </div>
       <div class="grid">
-        <div class="card"><h3><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7l6 6-6 6"/><path d="M13 19h7"/></svg>Confidence in code</h3><p>A pure function scores 0–5 from independent-origin clusters and Admiralty grades. The model only writes the prose — if it disagrees, the code wins.</p></div>
-        <div class="card"><h3><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/></svg>TLP per case</h3><p>RED, AMBER, GREEN or CLEAR decides which sources run and whether the seed may leave your machine. Passive mode, per-source toggles and a query log make egress deliberate.</p></div>
-        <div class="card"><h3><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="7" cy="7" r="3"/><circle cx="17" cy="17" r="3"/><path d="M10 7h7v7"/></svg>Independence, measured</h3><p>Simhash clusters collapse republished text, citation links join pages, and the count of independent origins caps the score. Admiralty codes and temporal decay travel with each item.</p></div>
-        <div class="card"><h3><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1018 0 9 9 0 10-18 0"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/></svg>25+ public sources</h3><p>ATT&CK, MISP Galaxy, CISA KEV, abuse.ch, RDAP, crt.sh, RIPEstat, VirusTotal, Shodan, OTX, GreyNoise, urlscan, Censys, CIRCL pDNS — each with typed errors and size limits.</p></div>
-        <div class="card"><h3><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 9h6v6H9z"/></svg>Yours, offline-first</h3><p>Runs on your machine via Docker. Standard-library Python, no bundled model, no Node. Cases and evidence stay in a local SQLite volume; the test suite runs fully offline.</p></div>
-        <div class="card"><h3><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v12H4z"/><path d="M8 20h8M12 16v4"/></svg>Share what you trust</h3><p>A relationship graph, STIX 2.1 export, local evidence snapshots hashed with SHA-256, and citations that lead back to the original source.</p></div>
+        <div class="card tier local">
+          <span class="tag">Local · runs under RED</span>
+          <h3>On your machine</h3>
+          <p class="egress">No request leaves the host. Your own corpus and prior work.</p>
+          <div class="chips">
+            <span class="chip">Local MISP index</span><span class="chip">Case history</span><span class="chip">Manual records</span>
+          </div>
+        </div>
+        <div class="card tier catalog">
+          <span class="tag">Catalog · runs under AMBER</span>
+          <h3>Downloaded, matched offline</h3>
+          <p class="egress">Feeds are fetched whole, then matched locally — the seed is never sent to a third party.</p>
+          <div class="chips">
+            <span class="chip">MITRE ATT&amp;CK</span><span class="chip">MISP Galaxy</span><span class="chip">CIRCL OSINT</span>
+            <span class="chip">CISA KEV</span><span class="chip">Feodo Tracker</span><span class="chip">URLhaus</span>
+            <span class="chip">MalwareBazaar</span><span class="chip">ThreatFox</span><span class="chip">Ransomware.live</span>
+          </div>
+        </div>
+        <div class="card tier web">
+          <span class="tag">Reputation &amp; web · opt-in, GREEN+</span>
+          <h3>Send the indicator out</h3>
+          <p class="egress">These query a third party with your seed, so each is opt-in per case and written to the query log.</p>
+          <div class="chips">
+            <span class="chip">RDAP</span><span class="chip">crt.sh</span><span class="chip">RIPEstat</span>
+            <span class="chip">VirusTotal</span><span class="chip">Shodan</span><span class="chip">OTX</span>
+            <span class="chip">GreyNoise</span><span class="chip">urlscan</span><span class="chip">Censys</span>
+            <span class="chip">CIRCL pDNS</span><span class="chip">SearXNG</span><span class="chip">Mwmbl</span>
+            <span class="chip">Arquivo.pt</span><span class="chip">Public GitHub</span>
+          </div>
+        </div>
+      </div>
+      <p class="muted" style="margin-top:16px;font-size:.9rem">Each collector has typed errors and response-size limits, and all collected text is treated as untrusted. Add provider keys to a local <span class="mono">.env</span> to light up the authenticated sources — all optional.</p>
+    </div>
+  </section>
+
+  <!-- GRADING -->
+  <section id="grading" class="alt">
+    <div class="wrap">
+      <div class="sec-head">
+        <p class="kicker">Grading &amp; confidence</p>
+        <h2>Every claim carries a grade. The score is math, not vibes.</h2>
+        <p>OpenInvestigation speaks the Admiralty System, then turns those grades into a 0–5 confidence with a pure, reviewable function — capped by independence so a single well-cited source can't masquerade as consensus.</p>
+      </div>
+      <div class="split">
+        <div>
+          <div class="axis">
+            <h3>Reliability <span class="muted">— the source</span></h3>
+            <p class="sub">A (completely reliable) → F (cannot be judged). The shipped table is deliberately conservative: unknown sources default to F.</p>
+            <div class="scale">
+              <div><b>B</b><span>MITRE ATT&amp;CK, CISA KEV, abuse.ch, RDAP, crt.sh, RIPEstat, GreyNoise, Censys, CIRCL pDNS, local MISP</span></div>
+              <div><b>C</b><span>VirusTotal, Shodan, ThreatFox, OTX, urlscan, MISP Galaxy, Ransomware.live</span></div>
+              <div><b>D</b><span>public web search, public GitHub, Mwmbl, Arquivo.pt</span></div>
+              <div><b>F</b><span>any source not yet graded (edit <span class="mono">reliability.json</span> to raise it)</span></div>
+            </div>
+          </div>
+          <div class="axis">
+            <h3>Credibility <span class="muted">— this claim</span></h3>
+            <p class="sub">1 (confirmed) → 6 (cannot be judged), derived in code from each item's qualifier.</p>
+            <div class="scale cred">
+              <div><b>1–2</b><span>confirmed · official / documented attribution</span></div>
+              <div><b>3</b><span>reported by source · catalog entry · verified text match</span></div>
+              <div><b>4–5</b><span>tracker profile / indirect context · unverified claim</span></div>
+              <div><b>6</b><span>cannot be judged</span></div>
+            </div>
+          </div>
+          <div class="codes">
+            <div class="code"><div class="k"><span class="r">B</span><span class="c">2</span></div><small>reliable source, documented claim</small></div>
+            <div class="code"><div class="k"><span class="r">C</span><span class="c">3</span></div><small>fairly reliable, reported claim</small></div>
+            <div class="code"><div class="k"><span class="r">D</span><span class="c">4</span></div><small>not usually reliable, needs review</small></div>
+          </div>
+        </div>
+        <div>
+          <p class="muted" style="margin:0 0 12px;font-size:.92rem">The 0–5 score is computed by a pure function and ships with its reasons. Independent clusters — not raw hit count — set the ceiling.</p>
+          <ul class="ladder">
+            <li><span class="s s5">5</span><span><b>Confirmed consensus.</b> Two or more independent clusters with confirmed (credibility 1) evidence.</span></li>
+            <li><span class="s s4">4</span><span><b>Corroborated.</b> Two or more independent clusters with high-credibility (1–2) evidence.</span></li>
+            <li><span class="s s3">3</span><span><b>Supported.</b> Independent corroboration, but nothing high-credibility — ceiling 3.</span></li>
+            <li><span class="s s2">2</span><span><b>Single origin.</b> One independent cluster, no corroboration — ceiling 2.</span></li>
+            <li><span class="s s0">0</span><span><b>Unassessed.</b> No independent evidence to judge.</span></li>
+          </ul>
+          <p class="muted" style="margin:14px 0 0;font-size:.88rem">Republished text collapses into one cluster via simhash, so a story quoted ten times still counts once. IP and domain sightings decay over time — an old hit is weaker evidence of current use.</p>
+        </div>
       </div>
     </div>
   </section>
 
-  <section id="how" style="background:var(--bg-soft);border-top:1px solid var(--border);border-bottom:1px solid var(--border)">
+  <!-- ASSESSMENT / LLM -->
+  <section id="assessment">
+    <div class="wrap">
+      <div class="sec-head">
+        <p class="kicker">LLM assessment</p>
+        <h2>The model writes the report — not the verdict</h2>
+        <p>When the TLP allows it, a model turns the graded evidence into an analyst-ready assessment. It is kept on a short leash: grounded in real citations, structured as competing hypotheses, and never allowed to move the number.</p>
+      </div>
+      <div class="grid">
+        <div class="card"><h3><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="9"/></svg>Grounded in evidence</h3><p>Every narrative and claim must cite evidence IDs that actually exist in the case. Hallucinated IDs are dropped, and an assessment with no real citation is rejected outright.</p></div>
+        <div class="card"><h3><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v18M5 8l7-5 7 5M5 16l7 5 7-5"/></svg>Competing hypotheses</h3><p>Output is structured ACH-style: a rationale, key claims with their supporting evidence, and competing hypotheses each tagged with supporting, contradicting and contextual items.</p></div>
+        <div class="card"><h3><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="11" width="16" height="9" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/></svg>The code keeps the score</h3><p>The model's own confidence is advisory: it's clamped to 0–5 and the code score stays authoritative. The prose is length-limited and sanitized before it's shown.</p></div>
+        <div class="card"><h3><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h10"/></svg>Your provider, your keys</h3><p>OpenAI or Anthropic, called directly over HTTPS with keys from your local <span class="mono">.env</span>. No bundled model, no Node, no third-party agent in the loop.</p></div>
+        <div class="card"><h3><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/><path d="M9 12l2 2 4-4"/></svg>Degrades safely</h3><p>Under RED and AMBER the hosted model doesn't run at all. If the model is unavailable or ungrounded, the code-generated parecer still stands in.</p></div>
+        <div class="card"><h3><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v12H4z"/><path d="M8 20h8M12 16v4"/></svg>Export what you trust</h3><p>A relationship graph, STIX 2.1 export, and local SHA-256 snapshots of verified pages — citations lead back to the original source.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- HOW -->
+  <section id="how" class="alt">
     <div class="wrap">
       <div class="sec-head">
         <p class="kicker">How it works</p>
@@ -188,9 +325,9 @@
       </div>
       <div class="steps">
         <div class="step"><div><h3>Seed</h3><p>Enter IOCs, CVEs, ASNs, CIDRs, wallets, hashes, or actor names. Defanged input (<span class="mono">hxxp</span>, <span class="mono">[.]</span>) is normalized and the original is kept.</p></div></div>
-        <div class="step"><div><h3>Collect under policy</h3><p>The case's TLP decides which sources run and whether the seed is sent out. A per-case query log records exactly what each source received.</p></div></div>
-        <div class="step"><div><h3>Correlate &amp; grade</h3><p>Evidence is clustered into independent origins, graded with Admiralty reliability and credibility, decayed over time, and filtered for shared infrastructure.</p></div></div>
-        <div class="step"><div><h3>Score &amp; assess</h3><p>Code computes the 0–5 confidence and the reasons. When the TLP allows it, a model (OpenAI or Anthropic, over HTTP) writes the prose — never the score.</p></div></div>
+        <div class="step"><div><h3>Collect under policy</h3><p>The case's TLP decides which source classes run and whether the seed may leave the host. Every outbound query is logged.</p></div></div>
+        <div class="step"><div><h3>Grade &amp; correlate</h3><p>Evidence is clustered into independent origins, graded with Admiralty reliability and credibility, decayed over time, and filtered for shared infrastructure.</p></div></div>
+        <div class="step"><div><h3>Score &amp; assess</h3><p>Code computes the 0–5 confidence and its reasons. When the TLP allows, a model writes the narrative and competing hypotheses — never the score.</p></div></div>
         <div class="step"><div><h3>Review &amp; export</h3><p>Confirm or reject evidence, open the local snapshot of a verified page, and export the case as JSON or STIX 2.1.</p></div></div>
       </div>
       <div class="tlp" style="margin-top:28px">
@@ -202,6 +339,7 @@
     </div>
   </section>
 
+  <!-- QUICKSTART -->
   <section id="quickstart">
     <div class="wrap">
       <div class="sec-head">
@@ -219,35 +357,14 @@
 <span class="c"># then open</span> <span class="o">http://127.0.0.1:8080</span></pre>
         </div>
       </div>
-      <p class="muted" style="margin-top:18px">Add provider keys (OpenAI or Anthropic for the written assessment; VirusTotal, Shodan, GreyNoise and more for extra sources) to a local <span class="mono">.env</span> — all optional. Set <span class="mono">OSINT_WEB=0</span> to run with no external collection at all.</p>
-    </div>
-  </section>
-
-  <section id="sources" style="background:var(--bg-soft);border-top:1px solid var(--border);border-bottom:1px solid var(--border)">
-    <div class="wrap">
-      <div class="sec-head">
-        <p class="kicker">Sources</p>
-        <h2>Local, catalog and opt-in</h2>
-        <p>Catalog sources are downloaded and matched locally, so they run even under AMBER. Reputation lookups send the seed, so they are opt-in.</p>
-      </div>
-      <div class="chips">
-        <span class="chip">Local MISP index</span><span class="chip">Local history</span><span class="chip">MITRE ATT&amp;CK</span>
-        <span class="chip">MISP Galaxy</span><span class="chip">CIRCL OSINT</span><span class="chip">ThreatDefence</span>
-        <span class="chip">CISA KEV</span><span class="chip">Feodo Tracker</span><span class="chip">URLhaus</span>
-        <span class="chip">MalwareBazaar</span><span class="chip">ThreatFox</span><span class="chip">RDAP</span>
-        <span class="chip">crt.sh</span><span class="chip">RIPEstat</span><span class="chip">VirusTotal</span>
-        <span class="chip">Shodan</span><span class="chip">OTX</span><span class="chip">GreyNoise</span>
-        <span class="chip">urlscan</span><span class="chip">Censys</span><span class="chip">CIRCL pDNS</span>
-        <span class="chip">Ransomware.live</span><span class="chip">SearXNG</span><span class="chip">Mwmbl</span>
-        <span class="chip">Arquivo.pt</span><span class="chip">Public GitHub</span>
-      </div>
+      <p class="muted" style="margin-top:18px">Add provider keys (OpenAI or Anthropic for the assessment; VirusTotal, Shodan, GreyNoise, Censys and more for extra sources) to a local <span class="mono">.env</span>. Set <span class="mono">OSINT_WEB=0</span> to run with no external collection at all.</p>
     </div>
   </section>
 
   <section class="band">
     <div class="wrap">
       <h2>Investigate threats on your terms.</h2>
-      <p class="lede" style="margin:0 auto 26px">Open source, self-hosted, and transparent about every request it makes.</p>
+      <p class="lede" style="margin:0 auto 26px">Open source, self-hosted, and transparent about every request it makes and every grade it assigns.</p>
       <div class="cta">
         <a class="btn btn-primary" href="https://github.com/V1n1v131r4/OpenInvestigation">Star on GitHub ↗</a>
         <a class="btn btn-ghost" href="#quickstart">Read the quickstart</a>
