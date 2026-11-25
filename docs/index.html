@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenInvestigation — self-hosted threat intelligence with auditable confidence</title>
+<meta name="description" content="OpenInvestigation is a self-hosted threat-investigation workspace. It correlates public evidence, keeps you in control of what leaves your machine (per-case TLP), and produces a 0–5 confidence score computed in code — not guessed by a model.">
+<meta property="og:type" content="website">
+<meta property="og:title" content="OpenInvestigation">
+<meta property="og:description" content="Self-hosted threat intelligence with auditable confidence. Per-case TLP, independent-origin scoring in code, 25+ public sources, STIX 2.1. Standard-library Python, no bundled model.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230a0d12'/%3E%3Cpath d='M7 11l5 5-5 5' fill='none' stroke='%2335d07f' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cline x1='15' y1='22' x2='24' y2='22' stroke='%2335d07f' stroke-width='2.4' stroke-linecap='round'/%3E%3C/svg%3E">
+<style>
+  :root{
+    --bg:#0a0d12; --bg-raised:#111722; --bg-soft:#0e141d; --border:#1e2633;
+    --text:#e6edf3; --muted:#8b97a7; --accent:#35d07f; --accent-soft:rgba(53,208,127,.12);
+    --amber:#f5b450; --red:#f2685f; --radius:14px; --maxw:1060px;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+    --sans:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);line-height:1.6;
+    -webkit-font-smoothing:antialiased;overflow-x:hidden}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .wrap{max-width:var(--maxw);margin:0 auto;padding:0 16px}
+  .mono{font-family:var(--mono)}
+  .muted{color:var(--muted)}
+
+  /* nav */
+  header.nav{position:sticky;top:0;z-index:20;background:rgba(10,13,18,.82);
+    backdrop-filter:blur(10px);border-bottom:1px solid var(--border)}
+  .nav .wrap{display:flex;align-items:center;gap:20px;height:60px}
+  .brand{display:flex;align-items:center;gap:9px;font-weight:700;letter-spacing:-.01em}
+  .brand .mark{width:22px;height:22px;flex:none}
+  .nav nav{margin-left:auto;display:flex;gap:22px;align-items:center}
+  .nav nav a{color:var(--muted);font-size:.93rem;font-weight:500}
+  .nav nav a:hover{color:var(--text);text-decoration:none}
+  .nav .ghl{color:var(--text)}
+  @media(max-width:680px){.nav nav a.hide-sm{display:none}}
+
+  /* hero */
+  .hero{padding:84px 0 56px;position:relative}
+  .hero::before{content:"";position:absolute;inset:0;z-index:-1;
+    background:radial-gradient(60% 50% at 50% -5%,rgba(53,208,127,.10),transparent 70%)}
+  .eyebrow{display:inline-flex;align-items:center;gap:8px;font-family:var(--mono);font-size:.8rem;
+    color:var(--accent);background:var(--accent-soft);border:1px solid rgba(53,208,127,.25);
+    padding:5px 11px;border-radius:999px;margin-bottom:22px}
+  .eyebrow .dot{width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px var(--accent)}
+  h1{font-size:clamp(2.1rem,5.2vw,3.5rem);line-height:1.08;letter-spacing:-.025em;margin:0 0 18px;font-weight:800}
+  h1 .accent{color:var(--accent)}
+  .lede{font-size:clamp(1.05rem,2.2vw,1.28rem);color:var(--muted);max-width:640px;margin:0 0 30px}
+  .cta{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+  .btn{display:inline-flex;align-items:center;gap:8px;font-weight:600;font-size:.98rem;
+    padding:12px 20px;border-radius:10px;border:1px solid transparent;cursor:pointer}
+  .btn-primary{background:var(--accent);color:#06240f;box-shadow:0 0 0 1px rgba(53,208,127,.4),0 10px 30px -12px var(--accent)}
+  .btn-primary:hover{text-decoration:none;filter:brightness(1.07)}
+  .btn-ghost{background:transparent;border-color:var(--border);color:var(--text)}
+  .btn-ghost:hover{text-decoration:none;border-color:var(--accent);color:var(--accent)}
+
+  /* terminal */
+  .term{margin-top:38px;background:var(--bg-soft);border:1px solid var(--border);border-radius:var(--radius);
+    overflow:hidden;box-shadow:0 30px 60px -30px rgba(0,0,0,.6)}
+  .term-bar{display:flex;align-items:center;gap:7px;padding:11px 14px;border-bottom:1px solid var(--border);background:#0c121b}
+  .term-bar i{width:11px;height:11px;border-radius:50%;background:#2a3444;display:inline-block}
+  .term-bar i:nth-child(1){background:#f2685f66}.term-bar i:nth-child(2){background:#f5b45066}.term-bar i:nth-child(3){background:#35d07f66}
+  .term-bar span{margin-left:auto;font-family:var(--mono);font-size:.76rem;color:var(--muted)}
+  .term pre{margin:0;padding:18px 16px;font-family:var(--mono);font-size:.9rem;line-height:1.75;overflow-x:auto;color:#cfe7d8}
+  .term .p{color:var(--accent)}.term .c{color:var(--muted)}.term .o{color:#9fd0ff}
+  .copy{position:relative}
+  .copy button{position:absolute;top:10px;right:10px;font-family:var(--mono);font-size:.72rem;color:var(--muted);
+    background:#0c121b;border:1px solid var(--border);border-radius:7px;padding:4px 9px;cursor:pointer}
+  .copy button:hover{color:var(--accent);border-color:var(--accent)}
+
+  /* sections */
+  section{padding:56px 0}
+  .sec-head{max-width:680px;margin:0 0 34px}
+  .sec-head h2{font-size:clamp(1.5rem,3.2vw,2.05rem);letter-spacing:-.02em;margin:0 0 10px;font-weight:800}
+  .sec-head p{color:var(--muted);margin:0;font-size:1.02rem}
+  .kicker{font-family:var(--mono);font-size:.78rem;color:var(--accent);text-transform:uppercase;letter-spacing:.14em;margin:0 0 12px}
+
+  .grid{display:grid;gap:16px;grid-template-columns:repeat(3,1fr)}
+  @media(max-width:860px){.grid{grid-template-columns:repeat(2,1fr)}}
+  @media(max-width:560px){.grid{grid-template-columns:1fr}}
+  .card{background:var(--bg-raised);border:1px solid var(--border);border-radius:var(--radius);padding:22px}
+  .card:hover{border-color:#2b3647}
+  .card h3{margin:0 0 8px;font-size:1.06rem;display:flex;align-items:center;gap:9px}
+  .card h3 .ic{width:22px;height:22px;flex:none;color:var(--accent)}
+  .card p{margin:0;color:var(--muted);font-size:.94rem}
+
+  /* steps */
+  .steps{counter-reset:s;display:grid;gap:14px}
+  .step{display:flex;gap:16px;background:var(--bg-raised);border:1px solid var(--border);border-radius:var(--radius);padding:18px 20px}
+  .step::before{counter-increment:s;content:counter(s);font-family:var(--mono);font-weight:700;color:var(--accent);
+    background:var(--accent-soft);border:1px solid rgba(53,208,127,.3);width:34px;height:34px;border-radius:9px;
+    display:grid;place-items:center;flex:none}
+  .step h3{margin:0 0 4px;font-size:1.02rem}.step p{margin:0;color:var(--muted);font-size:.93rem}
+
+  /* tlp */
+  .tlp{display:grid;gap:12px;grid-template-columns:repeat(4,1fr)}
+  @media(max-width:720px){.tlp{grid-template-columns:repeat(2,1fr)}}
+  .tlp div{border:1px solid var(--border);border-radius:11px;padding:14px;background:var(--bg-raised);font-size:.9rem}
+  .tlp b{font-family:var(--mono);display:block;margin-bottom:5px}
+  .tlp .red b{color:var(--red)}.tlp .amber b{color:var(--amber)}.tlp .green b{color:var(--accent)}.tlp .clear b{color:#9fd0ff}
+  .tlp span{color:var(--muted)}
+
+  /* sources */
+  .chips{display:flex;flex-wrap:wrap;gap:9px}
+  .chip{font-family:var(--mono);font-size:.82rem;color:var(--text);background:var(--bg-raised);
+    border:1px solid var(--border);border-radius:8px;padding:6px 11px}
+  .chip:hover{border-color:var(--accent);color:var(--accent)}
+
+  /* cta band */
+  .band{background:linear-gradient(180deg,var(--bg-soft),var(--bg));border-top:1px solid var(--border);border-bottom:1px solid var(--border);text-align:center}
+  .band h2{font-size:clamp(1.6rem,3.4vw,2.2rem);margin:0 0 14px;letter-spacing:-.02em}
+  .band .cta{justify-content:center}
+
+  footer{padding:40px 0;color:var(--muted);font-size:.9rem}
+  footer .wrap{display:flex;flex-wrap:wrap;gap:16px;align-items:center;justify-content:space-between}
+  footer nav{display:flex;flex-wrap:wrap;gap:18px}
+  footer a{color:var(--muted)}footer a:hover{color:var(--accent)}
+  .note{max-width:var(--maxw);margin:10px auto 0;padding:0 16px;color:#5f6b7a;font-size:.8rem}
+</style>
+</head>
+<body>
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="#top" aria-label="OpenInvestigation home">
+      <svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#111722"/><path d="M7 11l5 5-5 5" fill="none" stroke="#35d07f" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><line x1="15" y1="22" x2="24" y2="22" stroke="#35d07f" stroke-width="2.4" stroke-linecap="round"/></svg>
+      OpenInvestigation
+    </a>
+    <nav>
+      <a class="hide-sm" href="#features">Features</a>
+      <a class="hide-sm" href="#how">How it works</a>
+      <a class="hide-sm" href="#sources">Sources</a>
+      <a href="#quickstart">Quickstart</a>
+      <a class="ghl" href="https://github.com/V1n1v131r4/OpenInvestigation">GitHub ↗</a>
+    </nav>
+  </div>
+</header>
+
+<main id="top">
+  <section class="hero">
+    <div class="wrap">
+      <span class="eyebrow"><span class="dot"></span> Self-hosted · MIT · standard-library Python</span>
+      <h1>Threat intelligence with <span class="accent">confidence you can audit</span>.</h1>
+      <p class="lede">OpenInvestigation correlates public evidence about IOCs, actors, malware and campaigns — and keeps you in control of what leaves your machine. The 0–5 confidence is computed in code from independent sources, not guessed by a model.</p>
+      <div class="cta">
+        <a class="btn btn-primary" href="#quickstart">Get started</a>
+        <a class="btn btn-ghost" href="https://github.com/V1n1v131r4/OpenInvestigation">View on GitHub ↗</a>
+      </div>
+      <div class="term">
+        <div class="term-bar"><i></i><i></i><i></i><span>bash</span></div>
+        <div class="copy">
+          <button type="button" data-copy="git clone https://github.com/V1n1v131r4/OpenInvestigation.git&#10;cd OpenInvestigation&#10;docker compose up --build -d">Copy</button>
+<pre><span class="p">$</span> git clone https://github.com/V1n1v131r4/OpenInvestigation.git
+<span class="p">$</span> cd OpenInvestigation
+<span class="p">$</span> docker compose up --build -d
+<span class="c"># open http://127.0.0.1:8080</span></pre>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="features">
+    <div class="wrap">
+      <div class="sec-head">
+        <p class="kicker">Why it's different</p>
+        <h2>Rigor and privacy, built in</h2>
+        <p>Not another aggregator. The analytic rigor and OPSEC controls are the product.</p>
+      </div>
+      <div class="grid">
+        <div class="card"><h3><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7l6 6-6 6"/><path d="M13 19h7"/></svg>Confidence in code</h3><p>A pure function scores 0–5 from independent-origin clusters and Admiralty grades. The model only writes the prose — if it disagrees, the code wins.</p></div>
+        <div class="card"><h3><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/></svg>TLP per case</h3><p>RED, AMBER, GREEN or CLEAR decides which sources run and whether the seed may leave your machine. Passive mode, per-source toggles and a query log make egress deliberate.</p></div>
+        <div class="card"><h3><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="7" cy="7" r="3"/><circle cx="17" cy="17" r="3"/><path d="M10 7h7v7"/></svg>Independence, measured</h3><p>Simhash clusters collapse republished text, citation links join pages, and the count of independent origins caps the score. Admiralty codes and temporal decay travel with each item.</p></div>
+        <div class="card"><h3><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1018 0 9 9 0 10-18 0"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/></svg>25+ public sources</h3><p>ATT&CK, MISP Galaxy, CISA KEV, abuse.ch, RDAP, crt.sh, RIPEstat, VirusTotal, Shodan, OTX, GreyNoise, urlscan, Censys, CIRCL pDNS — each with typed errors and size limits.</p></div>
+        <div class="card"><h3><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 9h6v6H9z"/></svg>Yours, offline-first</h3><p>Runs on your machine via Docker. Standard-library Python, no bundled model, no Node. Cases and evidence stay in a local SQLite volume; the test suite runs fully offline.</p></div>
+        <div class="card"><h3><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v12H4z"/><path d="M8 20h8M12 16v4"/></svg>Share what you trust</h3><p>A relationship graph, STIX 2.1 export, local evidence snapshots hashed with SHA-256, and citations that lead back to the original source.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="how" style="background:var(--bg-soft);border-top:1px solid var(--border);border-bottom:1px solid var(--border)">
+    <div class="wrap">
+      <div class="sec-head">
+        <p class="kicker">How it works</p>
+        <h2>From a seed to an auditable case</h2>
+      </div>
+      <div class="steps">
+        <div class="step"><div><h3>Seed</h3><p>Enter IOCs, CVEs, ASNs, CIDRs, wallets, hashes, or actor names. Defanged input (<span class="mono">hxxp</span>, <span class="mono">[.]</span>) is normalized and the original is kept.</p></div></div>
+        <div class="step"><div><h3>Collect under policy</h3><p>The case's TLP decides which sources run and whether the seed is sent out. A per-case query log records exactly what each source received.</p></div></div>
+        <div class="step"><div><h3>Correlate &amp; grade</h3><p>Evidence is clustered into independent origins, graded with Admiralty reliability and credibility, decayed over time, and filtered for shared infrastructure.</p></div></div>
+        <div class="step"><div><h3>Score &amp; assess</h3><p>Code computes the 0–5 confidence and the reasons. When the TLP allows it, a model (OpenAI or Anthropic, over HTTP) writes the prose — never the score.</p></div></div>
+        <div class="step"><div><h3>Review &amp; export</h3><p>Confirm or reject evidence, open the local snapshot of a verified page, and export the case as JSON or STIX 2.1.</p></div></div>
+      </div>
+      <div class="tlp" style="margin-top:28px">
+        <div class="red"><b>RED</b><span>Local data only. No external request, no model.</span></div>
+        <div class="amber"><b>AMBER</b><span>Local + downloaded catalogs. Reputation opt-in. No web search or hosted model.</span></div>
+        <div class="green"><b>GREEN</b><span>Every enabled source.</span></div>
+        <div class="clear"><b>CLEAR</b><span>Every enabled source.</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="quickstart">
+    <div class="wrap">
+      <div class="sec-head">
+        <p class="kicker">Quickstart</p>
+        <h2>Running in two minutes</h2>
+        <p>You need Docker with Docker Compose. Everything else is optional.</p>
+      </div>
+      <div class="term">
+        <div class="term-bar"><i></i><i></i><i></i><span>bash</span></div>
+        <div class="copy">
+          <button type="button" data-copy="git clone https://github.com/V1n1v131r4/OpenInvestigation.git&#10;cd OpenInvestigation&#10;docker compose up --build -d">Copy</button>
+<pre><span class="p">$</span> git clone https://github.com/V1n1v131r4/OpenInvestigation.git
+<span class="p">$</span> cd OpenInvestigation
+<span class="p">$</span> docker compose up --build -d
+<span class="c"># then open</span> <span class="o">http://127.0.0.1:8080</span></pre>
+        </div>
+      </div>
+      <p class="muted" style="margin-top:18px">Add provider keys (OpenAI or Anthropic for the written assessment; VirusTotal, Shodan, GreyNoise and more for extra sources) to a local <span class="mono">.env</span> — all optional. Set <span class="mono">OSINT_WEB=0</span> to run with no external collection at all.</p>
+    </div>
+  </section>
+
+  <section id="sources" style="background:var(--bg-soft);border-top:1px solid var(--border);border-bottom:1px solid var(--border)">
+    <div class="wrap">
+      <div class="sec-head">
+        <p class="kicker">Sources</p>
+        <h2>Local, catalog and opt-in</h2>
+        <p>Catalog sources are downloaded and matched locally, so they run even under AMBER. Reputation lookups send the seed, so they are opt-in.</p>
+      </div>
+      <div class="chips">
+        <span class="chip">Local MISP index</span><span class="chip">Local history</span><span class="chip">MITRE ATT&amp;CK</span>
+        <span class="chip">MISP Galaxy</span><span class="chip">CIRCL OSINT</span><span class="chip">ThreatDefence</span>
+        <span class="chip">CISA KEV</span><span class="chip">Feodo Tracker</span><span class="chip">URLhaus</span>
+        <span class="chip">MalwareBazaar</span><span class="chip">ThreatFox</span><span class="chip">RDAP</span>
+        <span class="chip">crt.sh</span><span class="chip">RIPEstat</span><span class="chip">VirusTotal</span>
+        <span class="chip">Shodan</span><span class="chip">OTX</span><span class="chip">GreyNoise</span>
+        <span class="chip">urlscan</span><span class="chip">Censys</span><span class="chip">CIRCL pDNS</span>
+        <span class="chip">Ransomware.live</span><span class="chip">SearXNG</span><span class="chip">Mwmbl</span>
+        <span class="chip">Arquivo.pt</span><span class="chip">Public GitHub</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="wrap">
+      <h2>Investigate threats on your terms.</h2>
+      <p class="lede" style="margin:0 auto 26px">Open source, self-hosted, and transparent about every request it makes.</p>
+      <div class="cta">
+        <a class="btn btn-primary" href="https://github.com/V1n1v131r4/OpenInvestigation">Star on GitHub ↗</a>
+        <a class="btn btn-ghost" href="#quickstart">Read the quickstart</a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="brand">
+      <svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#111722"/><path d="M7 11l5 5-5 5" fill="none" stroke="#35d07f" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><line x1="15" y1="22" x2="24" y2="22" stroke="#35d07f" stroke-width="2.4" stroke-linecap="round"/></svg>
+      OpenInvestigation
+    </div>
+    <nav>
+      <a href="https://github.com/V1n1v131r4/OpenInvestigation">GitHub</a>
+      <a href="https://github.com/V1n1v131r4/OpenInvestigation/blob/main/CHANGELOG.md">Changelog</a>
+      <a href="https://github.com/V1n1v131r4/OpenInvestigation/blob/main/SECURITY.md">Security</a>
+      <a href="https://github.com/V1n1v131r4/OpenInvestigation/blob/main/LICENSE">MIT License</a>
+    </nav>
+  </div>
+  <p class="note">Self-hosted threat-intelligence tooling. Run it bound to localhost and treat all collected source text as untrusted. Source dates do not establish current use of an indicator.</p>
+</footer>
+
+<script>
+  for (const button of document.querySelectorAll("[data-copy]")) {
+    button.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(button.dataset.copy);
+        const original = button.textContent;
+        button.textContent = "Copied";
+        setTimeout(() => { button.textContent = original; }, 1400);
+      } catch (error) { /* clipboard unavailable */ }
+    });
+  }
+</script>
+</body>
+</html>
