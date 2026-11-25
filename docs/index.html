@@ -73,6 +73,15 @@
     background:#0c121b;border:1px solid var(--border);border-radius:7px;padding:4px 9px;cursor:pointer}
   .copy button:hover{color:var(--accent);border-color:var(--accent)}
 
+  /* product shot */
+  .shot-wrap{padding-top:10px}
+  .shot{border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;
+    background:var(--bg-soft);box-shadow:0 40px 90px -45px rgba(0,0,0,.75)}
+  .shot img{display:block;width:100%;height:auto}
+  figure.shot-fig{margin:0}
+  figcaption{color:var(--muted);font-size:.92rem;margin-top:16px;text-align:center;max-width:620px;margin-left:auto;margin-right:auto}
+  figcaption b{color:var(--text);font-weight:600}
+
   /* sections */
   section{padding:56px 0}
   .alt{background:var(--bg-soft);border-top:1px solid var(--border);border-bottom:1px solid var(--border)}
@@ -199,6 +208,20 @@
 <span class="c"># open http://127.0.0.1:8080</span></pre>
         </div>
       </div>
+    </div>
+  </section>
+
+  <!-- SHOWCASE -->
+  <section class="shot-wrap">
+    <div class="wrap">
+      <figure class="shot-fig">
+        <div class="shot">
+          <img src="assets/graph.png" width="2368" height="1266"
+               alt="OpenInvestigation relationship graph. The IP 143.198.64.151 links on the left to DigitalOcean hosting, open services 22/80/443, OSINT and VirusTotal reports and a case assessment; and on the right to the Transparent Tribe group, the Mythic tool, ObliqueRAT and njRAT malware, and ATT&CK techniques such as Drive-by Target, Malicious File and Dynamic Resolution."
+               loading="lazy" decoding="async">
+        </div>
+        <figcaption><b>One IP, fully pivoted.</b> Every node — infrastructure, reports, actor, tooling and ATT&amp;CK techniques — opens its own graded evidence.</figcaption>
+      </figure>
     </div>
   </section>
 
