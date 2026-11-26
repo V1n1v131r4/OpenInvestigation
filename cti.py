@@ -1607,7 +1607,7 @@ def fraud_dorks(terms):
     """Curated dork pack: where a fraud indicator is exposed in indexed pastes, channels, and dumps."""
     from collectors import SearchEnginesUnavailable, web_search
     failures = []
-    for seed in [row for row in terms if row["kind"] in FRAUD_TERM_KINDS][:SEED_SCAN_LIMIT]:
+    for seed in [row for row in terms if row["kind"] in DARK_SEARCH_KINDS][:SEED_SCAN_LIMIT]:
         phrase = " ".join(seed["value"].replace('"', " ").split())
         if not phrase:
             continue
@@ -2336,23 +2336,36 @@ def assessment_models():
     return models
 
 
+LLM_RETRIES = 2  # one retry on a transient failure (connection drop or 5xx); auth/429 are not retried
+
+
 def llm_http(url, headers, body, source):
     request = Request(url, data=json.dumps(body).encode(),
                       headers={"User-Agent": egress.user_agent(), "Content-Type": "application/json",
                                "Accept": "application/json", **headers})
-    try:
-        with build_opener(NoRedirects(), *egress.proxy_handlers()).open(request, timeout=90) as response:
-            content = response.read(4_000_001)
-    except HTTPError as error:
-        status = error.code
-        error.close()
-        if status in (401, 403):
-            raise ProviderError(f"{source}: authentication rejected (HTTP {status}). Check the API key.") from None
-        if status == 429:
-            raise ProviderError(f"{source}: rate or quota limit (HTTP 429).") from None
-        raise ProviderError(f"{source}: HTTP {status}.") from None
-    except (URLError, OSError):
-        raise ProviderError(f"{source}: connection failed.") from None
+    content = None
+    for attempt in range(LLM_RETRIES):
+        last = attempt + 1 == LLM_RETRIES
+        try:
+            with build_opener(NoRedirects(), *egress.proxy_handlers()).open(request, timeout=90) as response:
+                content = response.read(4_000_001)
+            break
+        except HTTPError as error:
+            status = error.code
+            error.close()
+            if status in (401, 403):
+                raise ProviderError(f"{source}: authentication rejected (HTTP {status}). Check the API key.") from None
+            if status == 429:
+                raise ProviderError(f"{source}: rate or quota limit (HTTP 429).") from None
+            if status >= 500 and not last:
+                time.sleep(1.5)
+                continue
+            raise ProviderError(f"{source}: HTTP {status}.") from None
+        except (URLError, OSError):
+            if not last:
+                time.sleep(1.5)
+                continue
+            raise ProviderError(f"{source}: connection failed.") from None
     if len(content) > 4_000_000:
         raise ProviderError(f"{source}: response exceeds the size limit.")
     try:

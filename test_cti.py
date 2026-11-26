@@ -98,8 +98,9 @@ class ThreatIntelligence(unittest.TestCase):
         self.assertIn('"artex" site:github.com', queries)
         self.assertTrue(any("site:reddit.com" in query for query in queries))
         rows = {item["source"]: item for item in case["relations"]}
-        self.assertEqual(len(case["relations"]), 2)
+        self.assertEqual(len(case["relations"]), 3)  # Busca web + Dorks de fraude (both find the repo) + OpenCode
         self.assertEqual(rows["Busca web"]["reference"], "https://github.com/example/ARTEX")
+        self.assertEqual(rows["Dorks de fraude"]["reference"], "https://github.com/example/ARTEX")
         self.assertIn("ARTEX no GitHub", rows["OpenCode"]["detail"])
         self.assertEqual(runner.call_args.args[0], "openai/gpt-5-mini")
         self.assertIn("Repositório público", runner.call_args.args[1])
@@ -714,6 +715,35 @@ class ThreatIntelligence(unittest.TestCase):
         self.assertEqual(found["lockbit"]["relationship"], "Grupo de ransomware (RansomLook)")
         self.assertEqual((found["victim-corp"]["source"], found["victim-corp"]["date"]),
                          ("RansomLook", "2025-12-05"))
+
+    def test_llm_http_retries_once_on_connection_failure(self):
+        import urllib.error
+
+        class FakeResponse:
+            def __init__(self, data):
+                self._data = data
+            def read(self, _n):
+                return self._data
+            def __enter__(self):
+                return self
+            def __exit__(self, *a):
+                return False
+
+        class FakeOpener:
+            def __init__(self):
+                self.calls = 0
+            def open(self, _request, timeout=0):
+                self.calls += 1
+                if self.calls == 1:
+                    raise urllib.error.URLError("transient")
+                return FakeResponse(b'{"ok": true}')
+
+        opener = FakeOpener()
+        self.enter(patch.object(cti, "build_opener", return_value=opener))
+        self.enter(patch.object(cti.time, "sleep", return_value=None))
+        result = cti.llm_http("https://api.example/v1", {}, {"prompt": "x"}, "OpenAI")
+        self.assertEqual(result, {"ok": True})
+        self.assertEqual(opener.calls, 2)  # failed once, retried, succeeded
 
     def test_fiat_validators_offline(self):
         self.assertTrue(cti.cpf_valid("390.533.447-05"))
