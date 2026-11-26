@@ -643,6 +643,33 @@ def ofac_sanctions_matches(seeds):
                        detail=detail[:600], confidence="Documented by source")
 
 
+RANSOMWHERE = "https://api.ransomwhe.re/export"
+
+
+def ransomwhere_matches(seeds):
+    wallets = {seed["value"]: seed for seed in seeds if seed["kind"] == "Wallet"}
+    if not wallets:
+        return
+    data = json.loads(cached_feed(RANSOMWHERE, 96_000_000))
+    index = {}
+    for row in array(data.get("result")) if isinstance(data, dict) else []:
+        if isinstance(row, dict) and isinstance(row.get("address"), str):
+            index.setdefault(row["address"], row)
+    lowered = {key.lower(): value for key, value in index.items()}
+    for value, seed in wallets.items():
+        row = index.get(value) or (lowered.get(value.lower()) if value.startswith("0x") else None)
+        if not row:
+            continue
+        usd = row.get("balanceUSD")
+        detail = " · ".join(filter(None, [f"Blockchain: {row.get('blockchain')}" if row.get("blockchain") else "",
+                                          f"Recebido: ~US$ {usd:,.0f}" if isinstance(usd, (int, float)) else "",
+                                          "Dataset Ransomwhere"]))
+        yield relation(seed, "Ransomware", str(row.get("family") or "Ransomware")[:200],
+                       "Endereço de pagamento de ransomware (Ransomwhere)", "Ransomwhere",
+                       date=str(row.get("createdAt") or "")[:10], reference="https://ransomwhe.re/",
+                       detail=detail[:600], confidence="Reportado pela fonte")
+
+
 def feodo_matches(seeds):
     wanted = {seed["value"]: seed for seed in seeds
               if seed["kind"] == "IP" and ipaddress.ip_address(seed["value"]).is_global}
@@ -877,6 +904,53 @@ def chainabuse_matches(seeds, key):
                            date=info["latest"], reference=reference,
                            detail=f"{info['count']} denúncia(s) comunitária(s) · categoria {category}"[:600],
                            confidence="A conferir")
+
+
+MEMPOOL = "https://mempool.space/api/address/"
+ETHERSCAN = "https://api.etherscan.io/v2/api"
+BTC_ADDRESS = r"bc1[ac-hj-np-z02-9]{11,71}|[13][a-km-zA-HJ-NP-Z1-9]{25,34}"
+
+
+def mempool_matches(seeds):
+    for seed in seeds:
+        if seed["kind"] != "Wallet" or not re.fullmatch(BTC_ADDRESS, seed["value"]):
+            continue
+        result = provider_json(MEMPOOL + quote(seed["value"], safe=""), {}, "mempool.space")
+        stats = result.get("chain_stats") if isinstance(result, dict) else None
+        if not isinstance(stats, dict):
+            continue
+        funded, spent, txs = stats.get("funded_txo_sum"), stats.get("spent_txo_sum"), stats.get("tx_count")
+        if not all(type(value) is int for value in (funded, spent, txs)) or txs == 0:
+            continue
+        detail = f"Saldo: {(funded - spent) / 1e8:.8f} BTC · Recebido: {funded / 1e8:.8f} BTC · {txs} tx"
+        yield relation(seed, "Carteira", f"{txs} transação(ões) on-chain"[:220],
+                       "Atividade on-chain (mempool.space)", "mempool.space",
+                       reference="https://mempool.space/address/" + quote(seed["value"], safe=""),
+                       detail=detail[:600], confidence="Documented by source")
+
+
+def etherscan_matches(seeds, key):
+    for seed in seeds:
+        if seed["kind"] != "Wallet" or not re.fullmatch(r"0x[a-fA-F0-9]{40}", seed["value"]):
+            continue
+        base = {"chainid": "1", "address": seed["value"], "apikey": key}
+        balance = provider_json(f"{ETHERSCAN}?{urlencode({**base, 'module': 'account', 'action': 'balance', 'tag': 'latest'})}",
+                                {}, "Etherscan")
+        eth = (f"{int(balance['result']) / 1e18:.6f} ETH"
+               if isinstance(balance, dict) and balance.get("status") == "1" and str(balance.get("result", "")).isdigit()
+               else "")
+        history = provider_json(f"{ETHERSCAN}?{urlencode({**base, 'module': 'account', 'action': 'txlist', 'startblock': '0', 'endblock': '99999999', 'page': '1', 'offset': '1', 'sort': 'asc'})}",
+                                {}, "Etherscan")
+        rows = history.get("result") if isinstance(history, dict) else None
+        first = rows[0].get("timeStamp") if isinstance(rows, list) and rows and isinstance(rows[0], dict) else None
+        first_seen = (datetime.fromtimestamp(int(first), timezone.utc).date().isoformat()
+                      if str(first).isdigit() else "")
+        if not eth and not first_seen:
+            continue
+        detail = " · ".join(filter(None, [f"Saldo: {eth}" if eth else "", f"Primeira tx: {first_seen}" if first_seen else ""]))
+        yield relation(seed, "Carteira", "Conta Ethereum", "Atividade on-chain (Etherscan)", "Etherscan",
+                       date=first_seen, reference="https://etherscan.io/address/" + seed["value"],
+                       detail=detail[:600], confidence="Documented by source")
 
 
 def otx_matches(seeds, key):
@@ -1372,6 +1446,7 @@ def historical_web_matches(seeds):
 def authenticated_sources():
     return {"ThreatFox": ("THREATFOX_AUTH_KEY", threatfox_matches),
             "Chainabuse": ("CHAINABUSE_API_KEY", chainabuse_matches),
+            "Etherscan": ("ETHERSCAN_API_KEY", etherscan_matches),
             "VirusTotal": ("VIRUSTOTAL_API_KEY", virustotal_matches),
             "Shodan": ("SHODAN_API_KEY", shodan_matches),
             "OTX": ("OTX_API_KEY", otx_matches),
@@ -1386,7 +1461,7 @@ def configured_sources():
     if os.getenv("OSINT_WEB", "1") == "1":
         sources.extend(("CIRCL OSINT", "ThreatDefence", "MITRE ATT&CK", "GitHub público", "Mwmbl", "Arquivo.pt",
                         "MISP Galaxy", "CISA KEV", "Feodo Tracker", "URLhaus", "MalwareBazaar",
-                        "OFAC SDN", "RDAP", "crt.sh", "RIPEstat"))
+                        "OFAC SDN", "Ransomwhere", "mempool.space", "RDAP", "crt.sh", "RIPEstat"))
         if os.getenv("OSINT_SEARCH_URL"):
             sources.extend(("Relatórios históricos na web", "Menções públicas", "Busca web", "Official cybercrime publications"))
         if os.getenv("RANSOMWARE_LIVE_API_KEY", "").strip():

@@ -658,6 +658,34 @@ class ThreatIntelligence(unittest.TestCase):
         self.assertEqual(found[0]["date"], "2024-08-01")
         self.assertIn("2 denúncia", found[0]["detail"])
 
+    def test_ransomwhere_matches_wallet_offline(self):
+        import json
+        export = json.dumps({"result": [
+            {"address": "1BitcoinEaterAddressDontSendf59kuE", "family": "Conti", "blockchain": "bitcoin",
+             "balanceUSD": 123456.0, "createdAt": "2023-02-01T00:00:00Z"}]}).encode()
+        self.enter(patch.object(cti, "cached_feed", return_value=export))
+        found = list(cti.ransomwhere_matches(cti.parse_seeds("wallet:1BitcoinEaterAddressDontSendf59kuE")))
+        self.assertEqual((found[0]["source"], found[0]["target"]), ("Ransomwhere", "Conti"))
+        self.assertEqual(found[0]["relationship"], "Endereço de pagamento de ransomware (Ransomwhere)")
+        self.assertIn("US$", found[0]["detail"])
+
+    def test_mempool_matches_btc_wallet_offline(self):
+        self.enter(patch.object(cti, "provider_json", return_value={
+            "chain_stats": {"funded_txo_sum": 150000000, "spent_txo_sum": 50000000, "tx_count": 7}}))
+        found = list(cti.mempool_matches(cti.parse_seeds("bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq")))
+        self.assertEqual(found[0]["source"], "mempool.space")
+        self.assertIn("1.00000000 BTC", found[0]["detail"])  # 1.5 funded - 0.5 spent
+        self.assertIn("7 tx", found[0]["detail"])
+
+    def test_etherscan_reports_balance_and_first_seen_offline(self):
+        responses = iter([{"status": "1", "message": "OK", "result": "2000000000000000000"},
+                          {"status": "1", "message": "OK", "result": [{"timeStamp": "1609459200", "hash": "0x1"}]}])
+        self.enter(patch.object(cti, "provider_json", side_effect=lambda *a, **k: next(responses)))
+        found = list(cti.etherscan_matches(cti.parse_seeds("0x" + "b" * 40), "key"))
+        self.assertEqual((found[0]["source"], found[0]["relationship"]), ("Etherscan", "Atividade on-chain (Etherscan)"))
+        self.assertIn("2.000000 ETH", found[0]["detail"])
+        self.assertEqual(found[0]["date"], "2021-01-01")
+
     def test_otx_matches_pulses_offline(self):
         self.enter(patch.object(cti, "provider_json", return_value={
             "pulse_info": {"pulses": [{"name": "APT Example campaign", "id": "p1", "modified": "2024-08-01",

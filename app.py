@@ -140,6 +140,10 @@ def submit_cti_iocs(case_id, seeds, entries, sources):
         tasks.append(COLLECTORS.submit(cti_stage, case_id, "MalwareBazaar", lambda: cti.malwarebazaar_matches(seeds), values))
     if "OFAC SDN" in sources and any(seed["kind"] == "Wallet" for seed in seeds):
         tasks.append(COLLECTORS.submit(cti_stage, case_id, "OFAC SDN", lambda: cti.ofac_sanctions_matches(seeds), values))
+    if "Ransomwhere" in sources and has_wallet:
+        tasks.append(COLLECTORS.submit(cti_stage, case_id, "Ransomwhere", lambda: cti.ransomwhere_matches(seeds), values))
+    if "mempool.space" in sources and has_wallet:
+        tasks.append(COLLECTORS.submit(cti_stage, case_id, "mempool.space", lambda: cti.mempool_matches(seeds), values))
     if "RDAP" in sources and any(seed["kind"] in ("IP", "Domínio", "ASN") for seed in seeds):
         tasks.append(COLLECTORS.submit(cti_stage, case_id, "RDAP", lambda: cti.rdap_matches(seeds), values))
     if "crt.sh" in sources and any(seed["kind"] == "Domínio" for seed in seeds):
