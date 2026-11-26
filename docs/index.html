@@ -182,6 +182,7 @@
     </a>
     <nav>
       <a class="hide-sm" href="#sources">Sources</a>
+      <a class="hide-sm" href="#fraud">Fraud</a>
       <a href="#grading">Grading</a>
       <a href="#assessment">Assessment</a>
       <a class="hide-sm" href="#quickstart">Quickstart</a>
@@ -195,7 +196,7 @@
     <div class="wrap">
       <span class="eyebrow"><span class="dot"></span> Built for analysts · self-hosted · MIT</span>
       <h1>Threat intelligence with <span class="accent">confidence you can audit</span>.</h1>
-      <p class="lede">OpenInvestigation pulls public evidence on IOCs, actors, malware and campaigns from 25+ graded sources, grades every claim on the Admiralty scale, and derives a 0–5 confidence <em>in code</em> — capped by how many independent origins agree. The model writes the assessment; it never sets the score.</p>
+      <p class="lede">OpenInvestigation pulls public evidence on IOCs, actors, malware, campaigns and financial-fraud indicators — crypto wallets, PIX keys and accounts — from 35+ graded sources, grades every claim on the Admiralty scale, and derives a 0–5 confidence <em>in code</em> — capped by how many independent origins agree. The model writes the assessment; it never sets the score.</p>
       <div class="cta">
         <a class="btn btn-primary" href="#quickstart">Get started</a>
         <a class="btn btn-ghost" href="https://github.com/V1n1v131r4/OpenInvestigation">View on GitHub ↗</a>
@@ -232,16 +233,17 @@
     <div class="wrap">
       <div class="sec-head">
         <p class="kicker">Sources</p>
-        <h2>25+ sources, and you control what leaves the box</h2>
+        <h2>35+ sources, and you control what leaves the box</h2>
         <p>Every source is classed by what it does to your indicator. The per-case TLP decides which classes run, and a query log records exactly what each one received.</p>
       </div>
       <div class="grid">
         <div class="card tier local">
           <span class="tag">Local · runs under RED</span>
           <h3>On your machine</h3>
-          <p class="egress">No request leaves the host. Your own corpus and prior work.</p>
+          <p class="egress">No request leaves the host. Your own corpus, prior work, and offline validation.</p>
           <div class="chips">
             <span class="chip">Local MISP index</span><span class="chip">Case history</span><span class="chip">Manual records</span>
+            <span class="chip">PIX/IBAN validation</span>
           </div>
         </div>
         <div class="card tier catalog">
@@ -250,8 +252,8 @@
           <p class="egress">Feeds are fetched whole, then matched locally — the seed is never sent to a third party.</p>
           <div class="chips">
             <span class="chip">MITRE ATT&amp;CK</span><span class="chip">MISP Galaxy</span><span class="chip">CIRCL OSINT</span>
-            <span class="chip">CISA KEV</span><span class="chip">Feodo Tracker</span><span class="chip">URLhaus</span>
-            <span class="chip">MalwareBazaar</span><span class="chip">ThreatFox</span><span class="chip">Ransomware.live</span>
+            <span class="chip">CISA KEV</span><span class="chip">Feodo Tracker</span><span class="chip">OFAC SDN</span>
+            <span class="chip">Ransomwhere</span>
           </div>
         </div>
         <div class="card tier web">
@@ -262,12 +264,48 @@
             <span class="chip">RDAP</span><span class="chip">crt.sh</span><span class="chip">RIPEstat</span>
             <span class="chip">VirusTotal</span><span class="chip">Shodan</span><span class="chip">OTX</span>
             <span class="chip">GreyNoise</span><span class="chip">urlscan</span><span class="chip">Censys</span>
-            <span class="chip">CIRCL pDNS</span><span class="chip">SearXNG</span><span class="chip">Mwmbl</span>
-            <span class="chip">Arquivo.pt</span><span class="chip">Public GitHub</span>
+            <span class="chip">CIRCL pDNS</span><span class="chip">URLhaus</span><span class="chip">MalwareBazaar</span>
+            <span class="chip">ThreatFox</span><span class="chip">Ransomware.live</span><span class="chip">Chainabuse</span>
+            <span class="chip">mempool.space</span><span class="chip">Etherscan</span><span class="chip">SearXNG</span>
+            <span class="chip">Mwmbl</span><span class="chip">Arquivo.pt</span><span class="chip">Public GitHub</span>
+          </div>
+        </div>
+        <div class="card tier web">
+          <span class="tag">Dark web &amp; exposure · opt-in, GREEN+</span>
+          <h3>Where an indicator surfaces</h3>
+          <p class="egress">Hidden-service and paste/leak indexes, searched over clearnet — we never fetch <span class="mono">.onion</span> directly, and never download the leaked data.</p>
+          <div class="chips">
+            <span class="chip">Ahmia</span><span class="chip">RansomLook</span><span class="chip">IntelX</span>
+            <span class="chip">Dork pack</span><span class="chip">BR scam portals</span>
           </div>
         </div>
       </div>
       <p class="muted" style="margin-top:16px;font-size:.9rem">Each collector has typed errors and response-size limits, and all collected text is treated as untrusted. Add provider keys to a local <span class="mono">.env</span> to light up the authenticated sources — all optional.</p>
+    </div>
+  </section>
+
+  <!-- FRAUD & DARK WEB -->
+  <section id="fraud">
+    <div class="wrap">
+      <div class="sec-head">
+        <p class="kicker">Financial fraud &amp; dark web</p>
+        <h2>Follow the money — wallets, PIX, and where they surface</h2>
+        <p>The same graded pipeline now tracks financial-fraud actors. Crypto has strong open attribution; fiat is weaker by nature, and the tool is honest about the difference.</p>
+      </div>
+      <div class="grid">
+        <div class="card">
+          <h3>Crypto wallets, globally</h3>
+          <p>A wallet is matched offline against the OFAC SDN sanctions list and the Ransomwhere ransom-payment dataset, screened for community scam reports on Chainabuse, and enriched with balance, transaction count and first-seen from mempool.space and Etherscan. BTC, ETH/EVM, Monero and Tron auto-detect; <span class="mono">wallet:</span> forces any chain.</p>
+        </div>
+        <div class="card">
+          <h3>Brazilian fiat, validated offline</h3>
+          <p><span class="mono">pix:</span>, <span class="mono">iban:</span> and <span class="mono">conta:</span> seeds are validated on the host — CPF/CNPJ check digits, IBAN mod-97, PIX key-type — with nothing sent out. There is <b>no open bulk feed of fraudulent PIX keys</b> (the Central Bank's fraud marking is a per-key, access-controlled lookup), so fiat yields validation plus low-reliability scam-report mentions, never a "this is fraud" verdict. CPF, phone and email are personal data — handle accordingly.</p>
+        </div>
+        <div class="card">
+          <h3>Dark web, over clearnet</h3>
+          <p>Hidden-service mentions are reached without Tor — Ahmia full-text search (CSAM-filtered) and the RansomLook leak-site tracker, with optional IntelX — and a curated dork pack sweeps pastes, Telegram and dumps. These surface <em>where</em> an indicator appears; OpenInvestigation never fetches <span class="mono">.onion</span> directly and never redistributes leaked data. Like every outbound source, they are opt-in and gated by the case TLP.</p>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -349,7 +387,7 @@
         <h2>From a seed to an auditable case</h2>
       </div>
       <div class="steps">
-        <div class="step"><div><h3>Seed</h3><p>Enter IOCs, CVEs, ASNs, CIDRs, wallets, hashes, or actor names. Defanged input (<span class="mono">hxxp</span>, <span class="mono">[.]</span>) is normalized and the original is kept.</p></div></div>
+        <div class="step"><div><h3>Seed</h3><p>Enter IOCs, CVEs, ASNs, CIDRs, hashes, crypto wallets, PIX keys, IBANs, or actor names. Defanged input (<span class="mono">hxxp</span>, <span class="mono">[.]</span>) is normalized and the original is kept.</p></div></div>
         <div class="step"><div><h3>Collect under policy</h3><p>The case's TLP decides which source classes run and whether the seed may leave the host. Every outbound query is logged.</p></div></div>
         <div class="step"><div><h3>Grade &amp; correlate</h3><p>Evidence is clustered into independent origins, graded with Admiralty reliability and credibility, decayed over time, and filtered for shared infrastructure.</p></div></div>
         <div class="step"><div><h3>Score &amp; assess</h3><p>Code computes the 0–5 confidence and its reasons. When the TLP allows, a model writes the narrative and competing hypotheses — never the score.</p></div></div>
