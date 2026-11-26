@@ -690,6 +690,14 @@ class ThreatIntelligence(unittest.TestCase):
         self.assertEqual((found[0]["source"], found[0]["target"]), ("Ahmia", "Leak Market"))
         self.assertTrue(found[0]["reference"].endswith(".onion/leak"))
 
+    def test_ahmia_runs_on_term_seed_offline(self):
+        home = b'<form id="searchForm"><input type="hidden" name="0cb369" value="7b6027"></form>'
+        results = ('<li class="result"><h4><a href="/search/redirect?redirect_url=http://abcdefghij234567.onion/x">'
+                   'LockBit blog</a></h4><cite>abcdefghij234567.onion</cite><p>lockbit leak</p></li>').encode()
+        self.enter(patch.object(cti, "download", side_effect=[home, results]))
+        found = list(cti.ahmia_matches(cti.parse_seeds("lockbit")))  # plain Termo must reach Ahmia now
+        self.assertEqual((found[0]["source"], found[0]["target"]), ("Ahmia", "LockBit blog"))
+
     def test_ahmia_without_token_yields_nothing_offline(self):
         self.enter(patch.object(cti, "download", return_value=b"<html>no form here</html>"))
         self.assertEqual(list(cti.ahmia_matches(cti.parse_seeds("pix:390.533.447-05"))), [])

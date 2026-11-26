@@ -86,15 +86,25 @@ const entityLabel = (value, kind) => kind === "Síntese" ? label(value) : value;
 
 // Mirror of policy.py so the form can preview which sources will receive the seeds.
 const SOURCE_CLASSES = {
-  local: ["MISP local", "Histórico local"],
-  catalog: ["MITRE ATT&CK", "MISP Galaxy", "CIRCL OSINT", "ThreatDefence"],
+  local: ["MISP local", "Histórico local", "Validação local"],
+  catalog: ["MITRE ATT&CK", "MISP Galaxy", "CIRCL OSINT", "ThreatDefence",
+    "CISA KEV", "Feodo Tracker", "OFAC SDN", "Ransomwhere"],
   web_search: ["Busca web", "GitHub público", "Mwmbl", "Arquivo.pt",
-    "Relatórios históricos na web", "Menções públicas", "Official cybercrime publications"],
-  reputation: ["VirusTotal", "Shodan", "ThreatFox", "Ransomware.live"],
+    "Relatórios históricos na web", "Menções públicas", "Official cybercrime publications",
+    "Denúncias BR", "Dorks de fraude"],
+  reputation: ["VirusTotal", "Shodan", "ThreatFox", "Ransomware.live", "URLhaus", "MalwareBazaar",
+    "RDAP", "crt.sh", "RIPEstat", "OTX", "GreyNoise", "urlscan", "Censys", "CIRCL pDNS",
+    "Chainabuse", "mempool.space", "Etherscan", "Ahmia", "RansomLook", "IntelX"],
   llm: ["OpenCode"],
 };
 const sourceClassOf = (source) =>
   Object.keys(SOURCE_CLASSES).find((cls) => SOURCE_CLASSES[cls].includes(source)) || "web_search";
+
+// Presentational tag on evidence cards, so an analyst sees how a mention was found.
+const DARKWEB_SOURCES = new Set(["Ahmia", "RansomLook", "IntelX"]);
+const WEB_SEARCH_SOURCES = new Set(SOURCE_CLASSES.web_search);
+const sourceBadge = (source) =>
+  DARKWEB_SOURCES.has(source) ? "Darkweb search" : WEB_SEARCH_SOURCES.has(source) ? "Web search" : "";
 
 function permitsSource(source, tlp, passive, overrides) {
   const override = overrides[source];
@@ -395,6 +405,7 @@ function inspect(node) {
       el("p", (outgoing ? "→ " : "← ") + entityLabel(other.value, other.kind), "muted"),
       el("p", [label(relation.source), relation.date && (relation.date_kind ? label(relation.date_kind) + " " : "") + relation.date]
         .filter(Boolean).join(" · "), "muted"));
+    if (sourceBadge(relation.source)) article.append(el("small", sourceBadge(relation.source), "result-status"));
     if (relation.admiralty) {
       article.append(el("p", "Admiralty · " + relation.admiralty.code + " (source reliability " +
         relation.admiralty.reliability + ", info credibility " + relation.admiralty.credibility + ")", "muted"));

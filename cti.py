@@ -1600,6 +1600,7 @@ FRAUD_DORK_SCOPES = (
     " (site:bitcointalk.org OR site:reddit.com)",
 )
 FRAUD_TERM_KINDS = ("Wallet", "PIX", "IBAN", "Conta")
+DARK_SEARCH_KINDS = FRAUD_TERM_KINDS + ("Termo", "Grupo")  # dark-web search also runs on an actor/term
 
 
 def fraud_dorks(terms):
@@ -1650,7 +1651,7 @@ def _ahmia_token():
 def ahmia_matches(terms):
     """Full-text search of Tor hidden services over clearnet (Ahmia filters CSAM via its own blacklist)."""
     from collectors import clean
-    seeds = [row for row in terms if row["kind"] in FRAUD_TERM_KINDS][:SEED_SCAN_LIMIT]
+    seeds = [row for row in terms if row["kind"] in DARK_SEARCH_KINDS][:SEED_SCAN_LIMIT]
     try:
         token = _ahmia_token() if seeds else None
     except (OSError, ValueError):
