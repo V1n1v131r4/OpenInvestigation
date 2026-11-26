@@ -23,8 +23,26 @@ semantic versioning once releases are tagged.
   search), RansomLook (ransomware leak sites), and optional IntelX (`INTELX_API_KEY`). Direct `.onion`
   fetching is intentionally out of scope (the egress layer rejects SOCKS).
 
+### Fixed
+
+- Ahmia returned no results: a search query needs the home page's rotating hidden form field, so the
+  collector now fetches that token first (cookieless) and reads the onion URL from each result.
+- RansomLook returned no results: corrected the endpoint to `/api/search?q=` (an object with
+  `groups`/`posts`), keeping a group only when its name matches and emitting each leak-site post.
+- Docker compose now forwards `CHAINABUSE_API_KEY`, `ETHERSCAN_API_KEY`, `INTELX_API_KEY` and
+  `ABUSECH_API_KEY` to the container, so those keyed sources actually activate; editor swap files
+  (`*.swp`/`*.swo`/`*~`) are gitignored.
+
 ### Changed
 
+- MalwareBazaar and URLhaus now require an abuse.ch Auth-Key, which the provider recently made
+  mandatory (requests without one return HTTP 401). They read `ABUSECH_API_KEY`, falling back to the
+  existing `THREATFOX_AUTH_KEY` since abuse.ch issues one key per account, and are offered only when a
+  key is set.
+- Dark-web search (Ahmia) and the fraud dork pack now also run on actor names and free-text terms, not
+  only on fraud indicators, and evidence cards tag how a mention was found (Darkweb search / Web search).
+- The hosted model is retried once on a transient connection failure or 5xx before the case falls back
+  to the code-written assessment (authentication and rate-limit errors are not retried).
 - Replaced the OpenCode CLI with direct HTTP calls to OpenAI and Anthropic for the model
   assessment. The Node runtime and the bundled model are gone from the image, removing the
   free-quota failure mode; `OSINT_OPENCODE_*` and `OPENCODE_API_KEY` are no longer used.
