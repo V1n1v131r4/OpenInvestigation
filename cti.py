@@ -547,6 +547,12 @@ OFAC_CURRENCIES = ("XBT", "ETH", "USDT", "USDC", "BSC", "ARB", "ETC", "BCH", "BT
                    "LTC", "XMR", "TRX", "SOL", "XRP", "DASH", "ZEC", "XVG")
 
 
+def abusech_key():
+    """abuse.ch now requires an Auth-Key (one per account) for MalwareBazaar/URLhaus. Reuse the
+    ThreatFox key when a dedicated one is not set — abuse.ch issues a single key per account."""
+    return os.getenv("ABUSECH_API_KEY", "").strip() or os.getenv("THREATFOX_AUTH_KEY", "").strip()
+
+
 def abuse_post(url, fields, source, key=None):
     headers = {"User-Agent": egress.user_agent(), "Accept": "application/json",
                "Content-Type": "application/x-www-form-urlencoded"}
@@ -780,7 +786,7 @@ def urlhaus_matches(seeds):
             continue
         if not host:
             continue
-        result = abuse_post(URLHAUS_HOST, {"host": host}, "URLhaus")
+        result = abuse_post(URLHAUS_HOST, {"host": host}, "URLhaus", key=abusech_key())
         if not result or result.get("query_status") != "ok":
             continue
         for row in array(result.get("urls")):
@@ -797,7 +803,7 @@ def malwarebazaar_matches(seeds):
     for seed in seeds:
         if seed["kind"] != "Hash" or len(seed["value"]) not in (32, 40, 64):
             continue
-        result = abuse_post(MALWAREBAZAAR, {"query": "get_info", "hash": seed["value"]}, "MalwareBazaar")
+        result = abuse_post(MALWAREBAZAAR, {"query": "get_info", "hash": seed["value"]}, "MalwareBazaar", key=abusech_key())
         if not result or result.get("query_status") != "ok":
             continue
         for row in array(result.get("data")):
@@ -1539,9 +1545,11 @@ def configured_sources():
     sources = ["MISP local", "Histórico local", "Validação local"]
     if os.getenv("OSINT_WEB", "1") == "1":
         sources.extend(("CIRCL OSINT", "ThreatDefence", "MITRE ATT&CK", "GitHub público", "Mwmbl", "Arquivo.pt",
-                        "MISP Galaxy", "CISA KEV", "Feodo Tracker", "URLhaus", "MalwareBazaar",
+                        "MISP Galaxy", "CISA KEV", "Feodo Tracker",
                         "OFAC SDN", "Ransomwhere", "mempool.space", "Ahmia", "RansomLook",
                         "RDAP", "crt.sh", "RIPEstat"))
+        if abusech_key():  # abuse.ch APIs now require authentication
+            sources.extend(("URLhaus", "MalwareBazaar"))
         if os.getenv("OSINT_SEARCH_URL"):
             sources.extend(("Relatórios históricos na web", "Menções públicas", "Busca web",
                             "Official cybercrime publications", "Denúncias BR", "Dorks de fraude"))
@@ -1600,13 +1608,14 @@ FRAUD_DORK_SCOPES = (
     " (site:bitcointalk.org OR site:reddit.com)",
 )
 FRAUD_TERM_KINDS = ("Wallet", "PIX", "IBAN", "Conta")
+DARK_SEARCH_KINDS = FRAUD_TERM_KINDS + ("Termo", "Grupo")  # dark-web search also runs on an actor/term
 
 
 def fraud_dorks(terms):
     """Curated dork pack: where a fraud indicator is exposed in indexed pastes, channels, and dumps."""
     from collectors import SearchEnginesUnavailable, web_search
     failures = []
-    for seed in [row for row in terms if row["kind"] in FRAUD_TERM_KINDS][:SEED_SCAN_LIMIT]:
+    for seed in [row for row in terms if row["kind"] in DARK_SEARCH_KINDS][:SEED_SCAN_LIMIT]:
         phrase = " ".join(seed["value"].replace('"', " ").split())
         if not phrase:
             continue
@@ -1631,51 +1640,80 @@ def fraud_dorks(terms):
         raise failures[0]
 
 
+AHMIA_HOME = "https://ahmia.fi/"
 AHMIA_SEARCH = "https://ahmia.fi/search/?"
 AHMIA_RESULT_LIMIT = 8  # onion results read from one Ahmia response
-RANSOMLOOK = "https://www.ransomlook.io/api/search/"
+RANSOMLOOK = "https://www.ransomlook.io/api/search"
+RANSOMLOOK_MATCH_LIMIT = 8  # groups/posts read from one RansomLook response
 INTELX_HOST = "https://2.intelx.io"
-ONION_URL = r"https?://[a-z2-7]{16,56}\.onion[^\s<\"]*"
+ONION_HOST = r"[a-z2-7]{16,56}\.onion"
+
+
+def _ahmia_token():
+    """Ahmia's search form carries a rotating hidden field; a query without it is bounced to the home page."""
+    home = download(AHMIA_HOME, limit=2_000_000).decode("utf-8", "replace")
+    found = re.search(r'<input type="hidden" name="([^"]+)" value="([^"]+)"', home)
+    return (found.group(1), found.group(2)) if found else None
 
 
 def ahmia_matches(terms):
     """Full-text search of Tor hidden services over clearnet (Ahmia filters CSAM via its own blacklist)."""
     from collectors import clean
-    for seed in [row for row in terms if row["kind"] in FRAUD_TERM_KINDS][:SEED_SCAN_LIMIT]:
+    seeds = [row for row in terms if row["kind"] in DARK_SEARCH_KINDS][:SEED_SCAN_LIMIT]
+    try:
+        token = _ahmia_token() if seeds else None
+    except (OSError, ValueError):
+        return
+    if not token:
+        return
+    for seed in seeds:
         try:
-            html = download(AHMIA_SEARCH + urlencode({"q": seed["value"]}), limit=2_000_000).decode("utf-8", "replace")
+            html = download(AHMIA_SEARCH + urlencode({"q": seed["value"], token[0]: token[1]}),
+                            limit=4_000_000).decode("utf-8", "replace")
         except (OSError, ValueError):
             continue
         for block in re.findall(r'<li class="result"[^>]*>(.*?)</li>', html, re.S)[:AHMIA_RESULT_LIMIT]:
-            onion = re.search(ONION_URL, block, re.I)
+            redirect = re.search(r"redirect_url=(https?://" + ONION_HOST + r'[^"&\s]*)', block, re.I)
+            cite = re.search(ONION_HOST, block, re.I)
+            onion = redirect.group(1) if redirect else ("http://" + cite.group(0)) if cite else ""
             if not onion:
                 continue
-            title_match = re.search(r"<a [^>]*>(.*?)</a>", block, re.S)
+            title_match = re.search(r"<a\s[^>]*>(.*?)</a>", block, re.S)
             snippet_match = re.search(r"<p>(.*?)</p>", block, re.S)
-            title = clean(title_match.group(1)) if title_match else ""
-            snippet = clean(snippet_match.group(1)) if snippet_match else ""
-            yield relation(seed, "Exposição (dark)", (title[:220] or onion.group(0)[:220]),
-                           "Menção em serviço onion (Ahmia)", "Ahmia", reference=onion.group(0),
+            title = " ".join(clean(title_match.group(1)).split()) if title_match else ""
+            snippet = " ".join(clean(snippet_match.group(1)).split()) if snippet_match else ""
+            yield relation(seed, "Exposição (dark)", (title[:220] or onion[:220]),
+                           "Menção em serviço onion (Ahmia)", "Ahmia", reference=onion,
                            detail=snippet[:600], confidence="A conferir")
 
 
 def ransomlook_matches(terms):
-    """Leak-site / ransomware-ecosystem matches from the open RansomLook tracker (clearnet API)."""
+    """Leak-site / ransomware-ecosystem matches from the open RansomLook tracker (clearnet API).
+
+    The search returns groups (matched on name or profile text), leak-site posts, and more. We keep the
+    group only when its name matches the query, and every post, since a post is already a query hit.
+    """
     for seed in [row for row in terms if row["kind"] in ("Wallet", "Termo", "Grupo")][:SEED_SCAN_LIMIT]:
-        try:
-            data = json.loads(download(RANSOMLOOK + quote(seed["value"], safe=""), limit=2_000_000))
-        except (OSError, ValueError):
+        query = seed["value"]
+        if len(query) < 2:
             continue
-        for row in data if isinstance(data, list) else []:
-            if not isinstance(row, dict):
+        result = provider_json(RANSOMLOOK + "?" + urlencode({"q": query}), {}, "RansomLook")
+        if not isinstance(result, dict):
+            continue
+        for group in array(result.get("groups"))[:RANSOMLOOK_MATCH_LIMIT]:
+            name = str(group.get("name") or "") if isinstance(group, dict) else ""
+            if name and query.casefold() in name.casefold():
+                yield relation(seed, "Grupo", name[:200], "Grupo de ransomware (RansomLook)", "RansomLook",
+                               reference="https://www.ransomlook.io/", detail=str(group.get("meta") or "")[:600],
+                               confidence="A conferir")
+        for post in array(result.get("posts"))[:RANSOMLOOK_MATCH_LIMIT]:
+            title = str(post.get("post_title") or "") if isinstance(post, dict) else ""
+            if not title.strip():
                 continue
-            group, title = str(row.get("group_name") or ""), str(row.get("post_title") or "")
-            if not group and not title:
-                continue
-            yield relation(seed, "Vazamento", (title[:220] or group[:220]),
-                           "Correspondência em leak-site (RansomLook)", "RansomLook",
-                           date=str(row.get("discovered") or "")[:10], reference="https://www.ransomlook.io/",
-                           detail=f"Grupo: {group}"[:600] if group else "", confidence="A conferir")
+            yield relation(seed, "Vazamento", title[:200], "Vítima em leak-site (RansomLook)", "RansomLook",
+                           date=str(post.get("discovered") or "")[:10],
+                           reference=clean_url(post.get("link")) or "https://www.ransomlook.io/",
+                           detail=str(post.get("description") or "")[:600], confidence="A conferir")
 
 
 def intelx_matches(terms, key):
@@ -2306,23 +2344,36 @@ def assessment_models():
     return models
 
 
+LLM_RETRIES = 2  # one retry on a transient failure (connection drop or 5xx); auth/429 are not retried
+
+
 def llm_http(url, headers, body, source):
     request = Request(url, data=json.dumps(body).encode(),
                       headers={"User-Agent": egress.user_agent(), "Content-Type": "application/json",
                                "Accept": "application/json", **headers})
-    try:
-        with build_opener(NoRedirects(), *egress.proxy_handlers()).open(request, timeout=90) as response:
-            content = response.read(4_000_001)
-    except HTTPError as error:
-        status = error.code
-        error.close()
-        if status in (401, 403):
-            raise ProviderError(f"{source}: authentication rejected (HTTP {status}). Check the API key.") from None
-        if status == 429:
-            raise ProviderError(f"{source}: rate or quota limit (HTTP 429).") from None
-        raise ProviderError(f"{source}: HTTP {status}.") from None
-    except (URLError, OSError):
-        raise ProviderError(f"{source}: connection failed.") from None
+    content = None
+    for attempt in range(LLM_RETRIES):
+        last = attempt + 1 == LLM_RETRIES
+        try:
+            with build_opener(NoRedirects(), *egress.proxy_handlers()).open(request, timeout=90) as response:
+                content = response.read(4_000_001)
+            break
+        except HTTPError as error:
+            status = error.code
+            error.close()
+            if status in (401, 403):
+                raise ProviderError(f"{source}: authentication rejected (HTTP {status}). Check the API key.") from None
+            if status == 429:
+                raise ProviderError(f"{source}: rate or quota limit (HTTP 429).") from None
+            if status >= 500 and not last:
+                time.sleep(1.5)
+                continue
+            raise ProviderError(f"{source}: HTTP {status}.") from None
+        except (URLError, OSError):
+            if not last:
+                time.sleep(1.5)
+                continue
+            raise ProviderError(f"{source}: connection failed.") from None
     if len(content) > 4_000_000:
         raise ProviderError(f"{source}: response exceeds the size limit.")
     try:

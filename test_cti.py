@@ -98,8 +98,9 @@ class ThreatIntelligence(unittest.TestCase):
         self.assertIn('"artex" site:github.com', queries)
         self.assertTrue(any("site:reddit.com" in query for query in queries))
         rows = {item["source"]: item for item in case["relations"]}
-        self.assertEqual(len(case["relations"]), 2)
+        self.assertEqual(len(case["relations"]), 3)  # Busca web + Dorks de fraude (both find the repo) + OpenCode
         self.assertEqual(rows["Busca web"]["reference"], "https://github.com/example/ARTEX")
+        self.assertEqual(rows["Dorks de fraude"]["reference"], "https://github.com/example/ARTEX")
         self.assertIn("ARTEX no GitHub", rows["OpenCode"]["detail"])
         self.assertEqual(runner.call_args.args[0], "openai/gpt-5-mini")
         self.assertIn("Repositório público", runner.call_args.args[1])
@@ -126,7 +127,7 @@ class ThreatIntelligence(unittest.TestCase):
         self.assertEqual(case["status"], "partial")
         self.assertTrue(any(event["source"] == "Busca web" and event["status"] == "error" for event in case["events"]))
         self.assertEqual({row["source"] for row in case["relations"]}, {"GitHub público", "OpenCode"})
-        self.assertIn("api.github.com/search/repositories?", github.call_args.args[0])
+        self.assertTrue(any("api.github.com/search/repositories?" in call.args[0] for call in github.call_args_list))
         self.assertIn("V1n1v131r4/ARTEX", runner.call_args.args[1])
 
     def test_term_is_verified_and_automatically_expanded_before_assessment(self):
@@ -614,6 +615,15 @@ class ThreatIntelligence(unittest.TestCase):
         self.assertEqual((found[0]["source"], found[0]["target"]), ("MalwareBazaar", "Emotet"))
         self.assertTrue(found[0]["reference"].endswith("/sample/" + "a" * 64 + "/"))
 
+    def test_abusech_sources_require_a_key(self):
+        with patch.dict(os.environ, {"OSINT_WEB": "1", "ABUSECH_API_KEY": "", "THREATFOX_AUTH_KEY": ""}):
+            self.assertNotIn("MalwareBazaar", cti.configured_sources())
+            self.assertNotIn("URLhaus", cti.configured_sources())
+        with patch.dict(os.environ, {"OSINT_WEB": "1", "ABUSECH_API_KEY": "abusech-key"}):
+            offered = cti.configured_sources()
+            self.assertIn("MalwareBazaar", offered)
+            self.assertIn("URLhaus", offered)
+
     def test_indicator_recognizes_crypto_wallets(self):
         self.assertEqual(cti.indicator("0x" + "a" * 40), ("Wallet", "0x" + "a" * 40))
         self.assertEqual(cti.indicator("4" + "A" * 94)[0], "Wallet")   # Monero
@@ -682,20 +692,67 @@ class ThreatIntelligence(unittest.TestCase):
         self.assertTrue(all("390.533.447-05" in row["detail"] for row in found))
 
     def test_ahmia_parses_onion_results_offline(self):
-        html = ('<ol><li class="result" data-v="1"><h4><a href="/search/redirect?redirect_url=x">Leak Market</a></h4>'
-                '<cite>http://abcdefghij234567.onion/leak</cite><p>chave 390.533.447-05 listada</p></li></ol>').encode()
-        self.enter(patch.object(cti, "download", return_value=html))
+        home = b'<form id="searchForm" action="/search/" method="get"><input type="hidden" name="0cb369" value="7b6027"></form>'
+        results = ('<ol><li class="result"><h4><a href="/search/redirect?redirect_url=http://abcdefghij234567.onion/leak">'
+                   'Leak Market</a></h4><cite>abcdefghij234567.onion</cite><p>chave 390.533.447-05 listada</p></li></ol>').encode()
+        self.enter(patch.object(cti, "download", side_effect=[home, results]))
         found = list(cti.ahmia_matches(cti.parse_seeds("pix:390.533.447-05")))
         self.assertEqual((found[0]["source"], found[0]["target"]), ("Ahmia", "Leak Market"))
         self.assertTrue(found[0]["reference"].endswith(".onion/leak"))
 
+    def test_ahmia_runs_on_term_seed_offline(self):
+        home = b'<form id="searchForm"><input type="hidden" name="0cb369" value="7b6027"></form>'
+        results = ('<li class="result"><h4><a href="/search/redirect?redirect_url=http://abcdefghij234567.onion/x">'
+                   'LockBit blog</a></h4><cite>abcdefghij234567.onion</cite><p>lockbit leak</p></li>').encode()
+        self.enter(patch.object(cti, "download", side_effect=[home, results]))
+        found = list(cti.ahmia_matches(cti.parse_seeds("lockbit")))  # plain Termo must reach Ahmia now
+        self.assertEqual((found[0]["source"], found[0]["target"]), ("Ahmia", "LockBit blog"))
+
+    def test_ahmia_without_token_yields_nothing_offline(self):
+        self.enter(patch.object(cti, "download", return_value=b"<html>no form here</html>"))
+        self.assertEqual(list(cti.ahmia_matches(cti.parse_seeds("pix:390.533.447-05"))), [])
+
     def test_ransomlook_matches_term_offline(self):
-        import json
-        self.enter(patch.object(cti, "download", return_value=json.dumps(
-            [{"group_name": "LockBit", "post_title": "victim-corp", "discovered": "2024-10-05 12:00:00"}]).encode()))
-        found = list(cti.ransomlook_matches(cti.parse_seeds("LockBit")))
-        self.assertEqual((found[0]["source"], found[0]["target"]), ("RansomLook", "victim-corp"))
-        self.assertEqual(found[0]["date"], "2024-10-05")
+        self.enter(patch.object(cti, "provider_json", return_value={
+            "groups": [{"name": "lockbit", "meta": "LockBit ransomware family"},
+                       {"name": "3am", "meta": "fallback when LockBit fails"}],
+            "posts": [{"post_title": "victim-corp", "discovered": "2025-12-05 11:26:01", "description": "leak", "link": ""}],
+            "markets": [], "leaks": [], "notes": []}))
+        found = {row["target"]: row for row in cti.ransomlook_matches(cti.parse_seeds("lockbit"))}
+        self.assertIn("lockbit", found)       # group kept: name matches the query
+        self.assertNotIn("3am", found)         # group dropped: only a profile-text mention
+        self.assertEqual(found["lockbit"]["relationship"], "Grupo de ransomware (RansomLook)")
+        self.assertEqual((found["victim-corp"]["source"], found["victim-corp"]["date"]),
+                         ("RansomLook", "2025-12-05"))
+
+    def test_llm_http_retries_once_on_connection_failure(self):
+        import urllib.error
+
+        class FakeResponse:
+            def __init__(self, data):
+                self._data = data
+            def read(self, _n):
+                return self._data
+            def __enter__(self):
+                return self
+            def __exit__(self, *a):
+                return False
+
+        class FakeOpener:
+            def __init__(self):
+                self.calls = 0
+            def open(self, _request, timeout=0):
+                self.calls += 1
+                if self.calls == 1:
+                    raise urllib.error.URLError("transient")
+                return FakeResponse(b'{"ok": true}')
+
+        opener = FakeOpener()
+        self.enter(patch.object(cti, "build_opener", return_value=opener))
+        self.enter(patch.object(cti.time, "sleep", return_value=None))
+        result = cti.llm_http("https://api.example/v1", {}, {"prompt": "x"}, "OpenAI")
+        self.assertEqual(result, {"ok": True})
+        self.assertEqual(opener.calls, 2)  # failed once, retried, succeeded
 
     def test_fiat_validators_offline(self):
         self.assertTrue(cti.cpf_valid("390.533.447-05"))

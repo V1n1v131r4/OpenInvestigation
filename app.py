@@ -177,9 +177,9 @@ def submit_cti_mentions(case_id, terms, sources):
     if "Denúncias BR" in sources and any(seed["kind"] in ("PIX", "IBAN", "Conta") for seed in terms):
         tasks.append(COLLECTORS.submit(cti_stage, case_id, "Denúncias BR", lambda: cti.br_fraud_mentions(terms), values))
     has_fraud = any(seed["kind"] in ("Wallet", "PIX", "IBAN", "Conta") for seed in terms)
-    if "Dorks de fraude" in sources and has_fraud:
+    if "Dorks de fraude" in sources and terms:
         tasks.append(COLLECTORS.submit(cti_stage, case_id, "Dorks de fraude", lambda: cti.fraud_dorks(terms), values))
-    if "Ahmia" in sources and has_fraud:
+    if "Ahmia" in sources and terms:
         tasks.append(COLLECTORS.submit(cti_stage, case_id, "Ahmia", lambda: cti.ahmia_matches(terms), values))
     if "RansomLook" in sources and any(seed["kind"] in ("Wallet", "Termo", "Grupo") for seed in terms):
         tasks.append(COLLECTORS.submit(cti_stage, case_id, "RansomLook", lambda: cti.ransomlook_matches(terms), values))
