@@ -658,6 +658,31 @@ class ThreatIntelligence(unittest.TestCase):
         self.assertEqual(found[0]["date"], "2024-08-01")
         self.assertIn("2 denúncia", found[0]["detail"])
 
+    def test_fiat_validators_offline(self):
+        self.assertTrue(cti.cpf_valid("390.533.447-05"))
+        self.assertFalse(cti.cpf_valid("111.111.111-11"))
+        self.assertTrue(cti.cnpj_valid("11.222.333/0001-81"))
+        self.assertFalse(cti.cnpj_valid("11.222.333/0001-00"))
+        self.assertTrue(cti.iban_valid("GB82 WEST 1234 5698 7654 32"))
+        self.assertFalse(cti.iban_valid("GB82 WEST 1234 5698 7654 31"))
+        self.assertEqual(cti.pix_key_type("390.533.447-05"), "CPF")
+        self.assertEqual(cti.pix_key_type("fulano@banco.com.br"), "Email")
+        self.assertEqual(cti.pix_key_type("+5511999998888"), "Telefone")
+        self.assertEqual(cti.pix_key_type("123e4567-e89b-12d3-a456-426614174000"), "EVP")
+
+    def test_fiat_validation_matches_classifies_pix_offline(self):
+        found = {row["origin"]: row for row in cti.fiat_validation_matches(cti.parse_seeds(
+            "pix:390.533.447-05\niban:GB82 WEST 1234 5698 7654 32"))}
+        pix = found["390.533.447-05"]
+        self.assertEqual((pix["source"], pix["target"], pix["relationship"]),
+                         ("Validação local", "CPF", "Chave PIX válida"))
+        iban = found["GB82WEST12345698765432"]
+        self.assertEqual((iban["source"], iban["target"]), ("Validação local", "Válido"))
+
+    def test_stix_export_includes_financial_account_observable(self):
+        bundle = cti.stix_bundle({"seeds": cti.parse_seeds("pix:fulano@banco.com.br"), "relations": []})
+        self.assertIn("x-financial-account", {obj["type"] for obj in bundle["objects"]})
+
     def test_ransomwhere_matches_wallet_offline(self):
         import json
         export = json.dumps({"result": [

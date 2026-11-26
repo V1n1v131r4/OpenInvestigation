@@ -119,6 +119,8 @@ def cti_stage(case_id, source, callback, terms=None):
 def submit_cti_iocs(case_id, seeds, entries, sources):
     values = [seed["value"] for seed in seeds]
     tasks = [COLLECTORS.submit(cti_stage, case_id, "MISP local", lambda: cti.misp_matches(seeds, entries), values)]
+    if "Validação local" in sources and any(seed["kind"] in ("PIX", "IBAN", "Conta") for seed in seeds):
+        tasks.append(COLLECTORS.submit(cti_stage, case_id, "Validação local", lambda: cti.fiat_validation_matches(seeds), values))
     has_iocs = any(seed["kind"] in ("IP", "URL", "Domínio", "Hash") for seed in seeds)
     has_wallet = any(seed["kind"] == "Wallet" for seed in seeds)
     if "Histórico local" in sources and has_iocs:

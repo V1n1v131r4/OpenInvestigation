@@ -17,7 +17,7 @@ Passive mode (any TLP): only local + catalog; no search, no per-seed reputation,
 TLP_LEVELS = ("CLEAR", "GREEN", "AMBER", "RED")
 DEFAULT_TLP = "AMBER"
 
-LOCAL_SOURCES = frozenset({"MISP local", "Histórico local"})
+LOCAL_SOURCES = frozenset({"MISP local", "Histórico local", "Validação local"})
 CATALOG_SOURCES = frozenset({"MITRE ATT&CK", "MISP Galaxy", "CIRCL OSINT", "ThreatDefence",
                              "CISA KEV", "Feodo Tracker", "OFAC SDN", "Ransomwhere"})
 WEB_SEARCH_SOURCES = frozenset({

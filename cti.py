@@ -87,6 +87,9 @@ SEED_PREFIXES = (
     ("file:", "Filename", r".{1,255}"),
     ("mutex:", "Mutex", r".{1,255}"),
     ("wallet:", "Wallet", None),  # force any chain (Litecoin, Solana, …) that autodetect skips
+    ("pix:", "PIX", None),        # Brazilian PIX key (CPF/CNPJ/email/phone/EVP); classified on validation
+    ("iban:", "IBAN", r"[A-Za-z]{2}\d{2}[A-Za-z0-9]{10,30}"),
+    ("conta:", "Conta", r".{1,64}"),
 )
 DOMAIN_PATTERN = r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z][A-Za-z0-9-]{1,62}"
 
@@ -107,6 +110,8 @@ def indicator(value):
     for prefix, kind, pattern in SEED_PREFIXES:
         if low.startswith(prefix):
             rest = value[len(prefix):].strip()
+            if kind == "IBAN":
+                rest = re.sub(r"\s", "", rest).upper()  # IBANs are often written in 4-char groups
             if not rest or (pattern and not re.fullmatch(pattern, rest)):
                 return None
             return kind, rest.lower() if kind in ("JA3", "JARM", "Imphash") else rest
@@ -668,6 +673,80 @@ def ransomwhere_matches(seeds):
                        "Endereço de pagamento de ransomware (Ransomwhere)", "Ransomwhere",
                        date=str(row.get("createdAt") or "")[:10], reference="https://ransomwhe.re/",
                        detail=detail[:600], confidence="Reportado pela fonte")
+
+
+def cpf_valid(value):
+    digits = re.sub(r"\D", "", value)
+    if len(digits) != 11 or len(set(digits)) == 1:
+        return False
+    for size in (9, 10):
+        total = sum(int(digits[i]) * ((size + 1) - i) for i in range(size))
+        if (total * 10 % 11) % 10 != int(digits[size]):
+            return False
+    return True
+
+
+def cnpj_valid(value):
+    digits = re.sub(r"\D", "", value)
+    if len(digits) != 14 or len(set(digits)) == 1:
+        return False
+    base_weights = [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]
+    for weights, position in ((base_weights, 12), ([6] + base_weights, 13)):
+        total = sum(int(digits[i]) * weights[i] for i in range(position))
+        check = total % 11
+        if (0 if check < 2 else 11 - check) != int(digits[position]):
+            return False
+    return True
+
+
+def iban_valid(value):
+    compact = re.sub(r"\s", "", value).upper()
+    if not re.fullmatch(r"[A-Z]{2}\d{2}[A-Z0-9]{10,30}", compact):
+        return False
+    rearranged = compact[4:] + compact[:4]
+    return int("".join(str(int(ch, 36)) if ch.isalpha() else ch for ch in rearranged)) % 97 == 1
+
+
+def pix_key_type(value):
+    text = value.strip()
+    if re.fullmatch(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}", text):
+        return "EVP"
+    if re.fullmatch(r"[^@\s]{1,64}@" + DOMAIN_PATTERN, text):
+        return "Email"
+    digits = re.sub(r"\D", "", text)
+    if text.startswith("+") or len(digits) in (12, 13):
+        return "Telefone" if 12 <= len(digits) <= 13 else None
+    if len(digits) == 11 and cpf_valid(text):
+        return "CPF"
+    if len(digits) == 14 and cnpj_valid(text):
+        return "CNPJ"
+    if len(digits) in (10, 11):  # BR phone without country code
+        return "Telefone"
+    return None
+
+
+def fiat_validation_matches(seeds):
+    """Offline, deterministic validation/classification of fiat indicators. Nothing leaves the machine."""
+    for seed in seeds:
+        value = seed["value"]
+        if seed["kind"] == "PIX":
+            subtype = pix_key_type(value)
+            if subtype:
+                yield relation(seed, "Validação", subtype, "Chave PIX válida", "Validação local",
+                               detail="Classificação offline determinística", confidence="Documented by source")
+            else:
+                yield relation(seed, "Validação", "Não classificada", "Chave PIX não reconhecida",
+                               "Validação local", detail="Formato fora de CPF/CNPJ/email/telefone/EVP",
+                               confidence="A conferir")
+        elif seed["kind"] == "IBAN":
+            ok = iban_valid(value)
+            yield relation(seed, "Validação", "Válido" if ok else "Inválido",
+                           "IBAN verificado (mod-97)", "Validação local",
+                           confidence="Documented by source" if ok else "A conferir")
+        elif seed["kind"] == "Conta":
+            yield relation(seed, "Validação", "Formato livre", "Conta bancária informada",
+                           "Validação local", detail="Sem registro aberto para validar titularidade",
+                           confidence="A conferir")
 
 
 def feodo_matches(seeds):
@@ -1457,7 +1536,7 @@ def authenticated_sources():
 
 
 def configured_sources():
-    sources = ["MISP local", "Histórico local"]
+    sources = ["MISP local", "Histórico local", "Validação local"]
     if os.getenv("OSINT_WEB", "1") == "1":
         sources.extend(("CIRCL OSINT", "ThreatDefence", "MITRE ATT&CK", "GitHub público", "Mwmbl", "Arquivo.pt",
                         "MISP Galaxy", "CISA KEV", "Feodo Tracker", "URLhaus", "MalwareBazaar",
@@ -2310,6 +2389,14 @@ def stix_bundle(case):
             properties = {"address": value}
             identifier = "cryptocurrency-wallet--" + str(uuid.uuid5(namespace, json.dumps(properties, sort_keys=True, separators=(",", ":"))))
             objects.setdefault(identifier, {"type": "cryptocurrency-wallet", "spec_version": "2.1", "id": identifier, **properties})
+            return identifier
+        if kind in ("PIX", "IBAN", "Conta"):
+            value = (raw or "").strip()
+            if not value:
+                return None
+            properties = {"account_type": kind, "number": value}
+            identifier = "x-financial-account--" + str(uuid.uuid5(namespace, json.dumps(properties, sort_keys=True, separators=(",", ":"))))
+            objects.setdefault(identifier, {"type": "x-financial-account", "spec_version": "2.1", "id": identifier, **properties})
             return identifier
         parsed = indicator(raw)
         if parsed is None or parsed[0] != kind:
