@@ -615,6 +615,15 @@ class ThreatIntelligence(unittest.TestCase):
         self.assertEqual((found[0]["source"], found[0]["target"]), ("MalwareBazaar", "Emotet"))
         self.assertTrue(found[0]["reference"].endswith("/sample/" + "a" * 64 + "/"))
 
+    def test_abusech_sources_require_a_key(self):
+        with patch.dict(os.environ, {"OSINT_WEB": "1", "ABUSECH_API_KEY": "", "THREATFOX_AUTH_KEY": ""}):
+            self.assertNotIn("MalwareBazaar", cti.configured_sources())
+            self.assertNotIn("URLhaus", cti.configured_sources())
+        with patch.dict(os.environ, {"OSINT_WEB": "1", "ABUSECH_API_KEY": "abusech-key"}):
+            offered = cti.configured_sources()
+            self.assertIn("MalwareBazaar", offered)
+            self.assertIn("URLhaus", offered)
+
     def test_indicator_recognizes_crypto_wallets(self):
         self.assertEqual(cti.indicator("0x" + "a" * 40), ("Wallet", "0x" + "a" * 40))
         self.assertEqual(cti.indicator("4" + "A" * 94)[0], "Wallet")   # Monero

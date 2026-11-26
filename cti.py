@@ -547,6 +547,12 @@ OFAC_CURRENCIES = ("XBT", "ETH", "USDT", "USDC", "BSC", "ARB", "ETC", "BCH", "BT
                    "LTC", "XMR", "TRX", "SOL", "XRP", "DASH", "ZEC", "XVG")
 
 
+def abusech_key():
+    """abuse.ch now requires an Auth-Key (one per account) for MalwareBazaar/URLhaus. Reuse the
+    ThreatFox key when a dedicated one is not set — abuse.ch issues a single key per account."""
+    return os.getenv("ABUSECH_API_KEY", "").strip() or os.getenv("THREATFOX_AUTH_KEY", "").strip()
+
+
 def abuse_post(url, fields, source, key=None):
     headers = {"User-Agent": egress.user_agent(), "Accept": "application/json",
                "Content-Type": "application/x-www-form-urlencoded"}
@@ -780,7 +786,7 @@ def urlhaus_matches(seeds):
             continue
         if not host:
             continue
-        result = abuse_post(URLHAUS_HOST, {"host": host}, "URLhaus")
+        result = abuse_post(URLHAUS_HOST, {"host": host}, "URLhaus", key=abusech_key())
         if not result or result.get("query_status") != "ok":
             continue
         for row in array(result.get("urls")):
@@ -797,7 +803,7 @@ def malwarebazaar_matches(seeds):
     for seed in seeds:
         if seed["kind"] != "Hash" or len(seed["value"]) not in (32, 40, 64):
             continue
-        result = abuse_post(MALWAREBAZAAR, {"query": "get_info", "hash": seed["value"]}, "MalwareBazaar")
+        result = abuse_post(MALWAREBAZAAR, {"query": "get_info", "hash": seed["value"]}, "MalwareBazaar", key=abusech_key())
         if not result or result.get("query_status") != "ok":
             continue
         for row in array(result.get("data")):
@@ -1539,9 +1545,11 @@ def configured_sources():
     sources = ["MISP local", "Histórico local", "Validação local"]
     if os.getenv("OSINT_WEB", "1") == "1":
         sources.extend(("CIRCL OSINT", "ThreatDefence", "MITRE ATT&CK", "GitHub público", "Mwmbl", "Arquivo.pt",
-                        "MISP Galaxy", "CISA KEV", "Feodo Tracker", "URLhaus", "MalwareBazaar",
+                        "MISP Galaxy", "CISA KEV", "Feodo Tracker",
                         "OFAC SDN", "Ransomwhere", "mempool.space", "Ahmia", "RansomLook",
                         "RDAP", "crt.sh", "RIPEstat"))
+        if abusech_key():  # abuse.ch APIs now require authentication
+            sources.extend(("URLhaus", "MalwareBazaar"))
         if os.getenv("OSINT_SEARCH_URL"):
             sources.extend(("Relatórios históricos na web", "Menções públicas", "Busca web",
                             "Official cybercrime publications", "Denúncias BR", "Dorks de fraude"))

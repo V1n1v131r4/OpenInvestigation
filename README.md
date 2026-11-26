@@ -84,8 +84,8 @@ docker compose up -d osint
 | RansomLook | Leak-site / ransomware-ecosystem matches for a wallet or actor name (clearnet API) |
 | IntelX | Paste/leak/darknet index, with `INTELX_API_KEY` (optional; free tier is very limited) |
 | Feodo Tracker | Botnet C2 IPs (downloaded blocklist) |
-| URLhaus | Malicious URLs hosted on a domain or IP |
-| MalwareBazaar | Known malware samples for a hash |
+| URLhaus | Malicious URLs hosted on a domain or IP, with `ABUSECH_API_KEY` (abuse.ch now requires auth) |
+| MalwareBazaar | Known malware samples for a hash, with `ABUSECH_API_KEY` (abuse.ch now requires auth) |
 | RDAP | Registration records for an IP, domain, or ASN |
 | crt.sh | Certificate-transparency subdomains for a domain |
 | RIPEstat | Announcing AS for an IP and the AS holder |
