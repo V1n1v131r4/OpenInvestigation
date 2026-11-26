@@ -19,7 +19,7 @@ DEFAULT_TLP = "AMBER"
 
 LOCAL_SOURCES = frozenset({"MISP local", "Histórico local"})
 CATALOG_SOURCES = frozenset({"MITRE ATT&CK", "MISP Galaxy", "CIRCL OSINT", "ThreatDefence",
-                             "CISA KEV", "Feodo Tracker"})
+                             "CISA KEV", "Feodo Tracker", "OFAC SDN"})
 WEB_SEARCH_SOURCES = frozenset({
     "Busca web", "GitHub público", "Mwmbl", "Arquivo.pt",
     "Relatórios históricos na web", "Menções públicas", "Official cybercrime publications",

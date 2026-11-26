@@ -612,6 +612,39 @@ class ThreatIntelligence(unittest.TestCase):
         self.assertEqual((found[0]["source"], found[0]["target"]), ("MalwareBazaar", "Emotet"))
         self.assertTrue(found[0]["reference"].endswith("/sample/" + "a" * 64 + "/"))
 
+    def test_indicator_recognizes_crypto_wallets(self):
+        self.assertEqual(cti.indicator("0x" + "a" * 40), ("Wallet", "0x" + "a" * 40))
+        self.assertEqual(cti.indicator("4" + "A" * 94)[0], "Wallet")   # Monero
+        self.assertEqual(cti.indicator("T" + "A" * 33)[0], "Wallet")   # Tron
+        self.assertEqual(cti.indicator("wallet:ltc1qexampleforced")[0], "Wallet")  # forced any chain
+
+    def test_ofac_matches_sanctioned_wallet_offline(self):
+        blob = ("<sdnList><sdnEntry><uid>1</uid><lastName>Lazarus Group</lastName>"
+                "<programList><program>DPRK3</program></programList>"
+                "<remarks>Digital Currency Address - ETH 0x8589427373D6D84E98730D7795D8f6f8731FDA16</remarks>"
+                "</sdnEntry></sdnList>").encode()
+        self.enter(patch.object(cti, "cached_feed", return_value=blob))
+        found = list(cti.ofac_sanctions_matches(cti.parse_seeds("0x8589427373D6D84E98730D7795D8f6f8731FDA16")))
+        self.assertEqual(len(found), 1)
+        self.assertEqual((found[0]["source"], found[0]["relationship"]), ("OFAC SDN", "Endereço sancionado (OFAC SDN)"))
+        self.assertEqual(found[0]["target"], "Lazarus Group")
+        self.assertIn("ETH", found[0]["detail"])
+        self.assertIn("DPRK3", found[0]["detail"])
+
+    def test_ofac_falls_back_to_github_extract_offline(self):
+        def feed(url, limit):
+            if url == cti.OFAC_SDN_XML:
+                raise OSError("treasury unavailable")
+            return b'["0x8589427373d6d84e98730d7795d8f6f8731fda16"]' if url == cti.OFAC_GITHUB.format("ETH") else b"[]"
+        self.enter(patch.object(cti, "cached_feed", side_effect=feed))
+        found = list(cti.ofac_sanctions_matches(cti.parse_seeds("0x8589427373D6D84E98730D7795D8f6f8731FDA16")))
+        self.assertEqual((found[0]["source"], found[0]["target"]), ("OFAC SDN", "Entidade sancionada"))
+        self.assertIn("ETH", found[0]["detail"])
+
+    def test_stix_export_includes_crypto_wallet_observable(self):
+        bundle = cti.stix_bundle({"seeds": cti.parse_seeds("0x" + "a" * 40), "relations": []})
+        self.assertIn("cryptocurrency-wallet", {obj["type"] for obj in bundle["objects"]})
+
     def test_otx_matches_pulses_offline(self):
         self.enter(patch.object(cti, "provider_json", return_value={
             "pulse_info": {"pulses": [{"name": "APT Example campaign", "id": "p1", "modified": "2024-08-01",

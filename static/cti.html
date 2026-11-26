@@ -18,7 +18,7 @@
       <form id="cti-new">
         <label>Case name <small>optional</small><input name="title" maxlength="150"></label>
         <label>IOCs, APT groups, or search terms<textarea name="seeds" required maxlength="7000" rows="5" placeholder="192.0.2.80&#10;example.org&#10;APT28"></textarea></label>
-        <p class="muted">One per line: IP, CIDR, domain, URL, hash, email, CVE, ASN, wallet, or a term. Defanged input (<code>hxxp</code>, <code>[.]</code>, <code>[at]</code>) is normalized. Prefix ambiguous types: <code>ua:</code>, <code>ja3:</code>, <code>jarm:</code>, <code>imphash:</code>, <code>ssdeep:</code>, <code>file:</code>, <code>mutex:</code>.</p>
+        <p class="muted">One per line: IP, CIDR, domain, URL, hash, email, CVE, ASN, wallet, or a term. Defanged input (<code>hxxp</code>, <code>[.]</code>, <code>[at]</code>) is normalized. Prefix ambiguous types: <code>ua:</code>, <code>ja3:</code>, <code>jarm:</code>, <code>imphash:</code>, <code>ssdeep:</code>, <code>file:</code>, <code>mutex:</code>, <code>wallet:</code>.</p>
         <label>Sharing (TLP) <small>required</small>
           <select name="tlp" id="cti-tlp" required>
             <option value="" selected disabled>Select a TLP level…</option>

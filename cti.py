@@ -86,6 +86,7 @@ SEED_PREFIXES = (
     ("ssdeep:", "Ssdeep", r"\d{1,10}:[A-Za-z0-9/+]{3,200}:[A-Za-z0-9/+]{3,200}"),
     ("file:", "Filename", r".{1,255}"),
     ("mutex:", "Mutex", r".{1,255}"),
+    ("wallet:", "Wallet", None),  # force any chain (Litecoin, Solana, …) that autodetect skips
 )
 DOMAIN_PATTERN = r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z][A-Za-z0-9-]{1,62}"
 
@@ -135,6 +136,10 @@ def indicator(value):
     if re.fullmatch(r"[a-fA-F0-9]{32}|[a-fA-F0-9]{40}|[a-fA-F0-9]{64}", value):
         return "Hash", value.lower()
     if re.fullmatch(r"bc1[ac-hj-np-z02-9]{11,71}", value) or re.fullmatch(r"[13][a-km-zA-HJ-NP-Z1-9]{25,34}", value):
+        return "Wallet", value
+    if re.fullmatch(r"[48][0-9A-Za-z]{94}", value):  # Monero (starts 4/8, 95 chars)
+        return "Wallet", value
+    if re.fullmatch(r"T[1-9A-HJ-NP-Za-km-z]{33}", value):  # Tron (base58, starts T)
         return "Wallet", value
     try:
         parsed = urlsplit(value)
@@ -528,6 +533,13 @@ CISA_KEV = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulne
 FEODO = "https://feodotracker.abuse.ch/downloads/ipblocklist.json"
 URLHAUS_HOST = "https://urlhaus-api.abuse.ch/v1/host/"
 MALWAREBAZAAR = "https://mb-api.abuse.ch/api/v1/"
+# Sanctioned digital-currency addresses. Primary: the official Treasury SDN XML (entity name +
+# program in the remarks). Fallback: the nightly per-chain extract maintained from the same SDN.
+OFAC_SDN_XML = "https://www.treasury.gov/ofac/downloads/sdn.xml"
+OFAC_GITHUB = "https://raw.githubusercontent.com/0xB10C/ofac-sanctioned-digital-currency-addresses/lists/sanctioned_addresses_{}.json"
+OFAC_SEARCH = "https://sanctionssearch.ofac.treas.gov/"
+OFAC_CURRENCIES = ("XBT", "ETH", "USDT", "USDC", "BSC", "ARB", "ETC", "BCH", "BTG", "BSV",
+                   "LTC", "XMR", "TRX", "SOL", "XRP", "DASH", "ZEC", "XVG")
 
 
 def abuse_post(url, fields, source, key=None):
@@ -572,6 +584,63 @@ def cisa_kev_matches(seeds):
                        "Listed in CISA KEV", "CISA KEV", date=str(row.get("dateAdded") or "")[:10],
                        reference="https://www.cisa.gov/known-exploited-vulnerabilities-catalog",
                        detail=detail, confidence="Documentada pela fonte")
+
+
+def _ofac_github_index():
+    """Fallback: per-chain address lists maintained nightly from the same SDN. Addresses only."""
+    index = {}
+    for currency in OFAC_CURRENCIES:
+        try:
+            data = json.loads(cached_feed(OFAC_GITHUB.format(currency), 4_000_000))
+        except (OSError, ValueError):
+            continue
+        for address in data if isinstance(data, list) else []:
+            if isinstance(address, str) and address.strip():
+                index.setdefault(address.strip(), {"name": "", "program": "", "currency": currency})
+    return index
+
+
+def _ofac_index():
+    """address -> {name, program, currency} from the official SDN; GitHub extract on any failure.
+
+    The classic SDN XML carries digital-currency addresses in each entry's free-text remarks as
+    'Digital Currency Address - <TICKER> <address>'. We read name/program per <sdnEntry> chunk and
+    attach every address found in that chunk, so a hit reports who is sanctioned, not just that it is.
+    """
+    try:
+        blob = cached_feed(OFAC_SDN_XML, 80_000_000).decode("utf-8", "replace")
+    except (OSError, ValueError):
+        return _ofac_github_index()
+    index = {}
+    for chunk in re.split(r"<sdnEntry>", blob)[1:]:
+        addresses = re.findall(r"Digital Currency Address - (\w+)\s+([1-9A-HJ-NP-Za-km-z0-9x]{16,120})", chunk)
+        if not addresses:
+            continue
+        last = re.search(r"<lastName>([^<]*)</lastName>", chunk)
+        first = re.search(r"<firstName>([^<]*)</firstName>", chunk)
+        name = " ".join(part.group(1).strip() for part in (first, last) if part and part.group(1).strip())
+        program = ", ".join(dict.fromkeys(re.findall(r"<program>([^<]*)</program>", chunk)))
+        for currency, address in addresses:
+            index.setdefault(address, {"name": name, "program": program, "currency": currency})
+    return index or _ofac_github_index()
+
+
+def ofac_sanctions_matches(seeds):
+    wallets = {seed["value"]: seed for seed in seeds if seed["kind"] == "Wallet"}
+    if not wallets:
+        return
+    index = _ofac_index()
+    lowered = {key.lower(): value for key, value in index.items()}  # EVM addresses compare case-insensitively
+    for value, seed in wallets.items():
+        hit = index.get(value) or (lowered.get(value.lower()) if value.startswith("0x") else None)
+        if not hit:
+            continue
+        detail = " · ".join(filter(None, [f"Moeda: {hit['currency']}" if hit.get("currency") else "",
+                                          f"Programa: {hit['program']}" if hit.get("program") else "",
+                                          "Lista OFAC SDN (Tesouro dos EUA)"]))
+        yield relation(seed, "Sanção", (hit.get("name") or "Entidade sancionada")[:200],
+                       "Endereço sancionado (OFAC SDN)", "OFAC SDN", reference=OFAC_SEARCH,
+                       detail=detail[:600], confidence="Documented by source")
 
 
 def feodo_matches(seeds):
@@ -1273,7 +1342,7 @@ def configured_sources():
     if os.getenv("OSINT_WEB", "1") == "1":
         sources.extend(("CIRCL OSINT", "ThreatDefence", "MITRE ATT&CK", "GitHub público", "Mwmbl", "Arquivo.pt",
                         "MISP Galaxy", "CISA KEV", "Feodo Tracker", "URLhaus", "MalwareBazaar",
-                        "RDAP", "crt.sh", "RIPEstat"))
+                        "OFAC SDN", "RDAP", "crt.sh", "RIPEstat"))
         if os.getenv("OSINT_SEARCH_URL"):
             sources.extend(("Relatórios históricos na web", "Menções públicas", "Busca web", "Official cybercrime publications"))
         if os.getenv("RANSOMWARE_LIVE_API_KEY", "").strip():
@@ -2115,6 +2184,14 @@ def stix_bundle(case):
     namespace = uuid.UUID("00abedb4-aa42-466c-9c01-fed23315a9b7")
 
     def observable(kind, raw):
+        if kind == "Wallet":
+            value = (raw or "").strip()
+            if not value:
+                return None
+            properties = {"address": value}
+            identifier = "cryptocurrency-wallet--" + str(uuid.uuid5(namespace, json.dumps(properties, sort_keys=True, separators=(",", ":"))))
+            objects.setdefault(identifier, {"type": "cryptocurrency-wallet", "spec_version": "2.1", "id": identifier, **properties})
+            return identifier
         parsed = indicator(raw)
         if parsed is None or parsed[0] != kind:
             return None
