@@ -23,6 +23,7 @@ CATALOG_SOURCES = frozenset({"MITRE ATT&CK", "MISP Galaxy", "CIRCL OSINT", "Thre
 WEB_SEARCH_SOURCES = frozenset({
     "Busca web", "GitHub público", "Mwmbl", "Arquivo.pt",
     "Relatórios históricos na web", "Menções públicas", "Official cybercrime publications",
+    "Denúncias BR",
 })
 REPUTATION_SOURCES = frozenset({"VirusTotal", "Shodan", "ThreatFox", "Ransomware.live",
                                 "URLhaus", "MalwareBazaar", "RDAP", "crt.sh", "RIPEstat",

@@ -658,6 +658,17 @@ class ThreatIntelligence(unittest.TestCase):
         self.assertEqual(found[0]["date"], "2024-08-01")
         self.assertIn("2 denúncia", found[0]["detail"])
 
+    def test_br_fraud_mentions_scopes_to_portals_offline(self):
+        import collectors
+        results = [("Golpe PIX relatado", "https://www.reclameaqui.com.br/empresa/x/golpe-pix-390",
+                    "Query · Vítima transferiu para a chave 390.533.447-05 em golpe"),
+                   ("Nota solta", "https://exemplo.com/outro", "Query · texto sem a chave")]
+        self.enter(patch.object(collectors, "web_search", return_value=results))
+        found = list(cti.br_fraud_mentions(cti.parse_seeds("pix:390.533.447-05")))
+        self.assertEqual(len(found), 1)  # off-scope host dropped
+        self.assertEqual((found[0]["source"], found[0]["relationship"]), ("Denúncias BR", "Denúncia pública (Brasil)"))
+        self.assertTrue(found[0]["reference"].startswith("https://www.reclameaqui.com.br"))
+
     def test_fiat_validators_offline(self):
         self.assertTrue(cti.cpf_valid("390.533.447-05"))
         self.assertFalse(cti.cpf_valid("111.111.111-11"))

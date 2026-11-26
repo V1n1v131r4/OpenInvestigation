@@ -174,6 +174,8 @@ def submit_cti_mentions(case_id, terms, sources):
         key = os.environ["RANSOMWARE_LIVE_API_KEY"].strip()
         tasks.append(COLLECTORS.submit(cti_stage, case_id, "Ransomware.live",
                                        lambda: cti.ransomware_live_matches(terms, key), values))
+    if "Denúncias BR" in sources and any(seed["kind"] in ("PIX", "IBAN", "Conta") for seed in terms):
+        tasks.append(COLLECTORS.submit(cti_stage, case_id, "Denúncias BR", lambda: cti.br_fraud_mentions(terms), values))
     return tasks
 
 
@@ -206,7 +208,7 @@ def run_cti(case_id, seeds):
     available = cti.configured_sources()
     sources = policy.effective_sources(available, tlp, passive, overrides)
     tasks = submit_cti_iocs(case_id, seeds, entries, sources)
-    terms = [seed for seed in seeds if seed["kind"] in ("Termo", "Grupo")]
+    terms = [seed for seed in seeds if seed["kind"] in ("Termo", "Grupo", "Wallet", "PIX", "IBAN", "Conta")]
     missing_search = (bool(terms) and os.getenv("OSINT_WEB", "1") == "1"
                       and policy.permits_source("Busca web", tlp, passive, overrides)
                       and "Busca web" not in available)

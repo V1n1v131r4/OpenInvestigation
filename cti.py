@@ -1542,7 +1542,8 @@ def configured_sources():
                         "MISP Galaxy", "CISA KEV", "Feodo Tracker", "URLhaus", "MalwareBazaar",
                         "OFAC SDN", "Ransomwhere", "mempool.space", "RDAP", "crt.sh", "RIPEstat"))
         if os.getenv("OSINT_SEARCH_URL"):
-            sources.extend(("Relatórios históricos na web", "Menções públicas", "Busca web", "Official cybercrime publications"))
+            sources.extend(("Relatórios históricos na web", "Menções públicas", "Busca web",
+                            "Official cybercrime publications", "Denúncias BR"))
         if os.getenv("RANSOMWARE_LIVE_API_KEY", "").strip():
             sources.append("Ransomware.live")
         if assessment_models():
@@ -1566,6 +1567,26 @@ def public_mentions(groups):
                 continue
             yield relation(seed, "Menção", title[:220], "Menção indexada", "Busca web pública",
                            reference=url, detail=snippet[:600], confidence="A conferir")
+
+
+BR_FRAUD_SITES = ("reclameaqui.com.br", "consumidor.gov.br", "golpes.org", "reddit.com")
+
+
+def br_fraud_mentions(terms):
+    """Scam-report mentions of a fiat indicator on Brazilian complaint portals. Low reliability."""
+    from collectors import phrase_match, web_search
+    scope = " OR ".join(f"site:{site}" for site in BR_FRAUD_SITES)
+    for seed in [row for row in terms if row["kind"] in ("PIX", "IBAN", "Conta")][:SEED_SCAN_LIMIT]:
+        phrase = seed["value"].replace('"', "")
+        for title, url, excerpt in web_search(f'"{phrase}" (golpe OR fraude OR estelionato) ({scope})'):
+            host = urlsplit(url).hostname
+            if not host or not any(host == site or host.endswith("." + site) for site in BR_FRAUD_SITES):
+                continue
+            snippet = excerpt.partition(" · ")[2]
+            if not phrase_match(title + " " + snippet, phrase):
+                continue
+            yield relation(seed, "Denúncia", (title.strip()[:220] or host), "Denúncia pública (Brasil)",
+                           "Denúncias BR", reference=url, detail=snippet[:600], confidence="A conferir")
 
 
 def keyword_matches(terms):
@@ -1743,7 +1764,7 @@ def ransomware_live_matches(terms, key):
                            confidence="Unverified claims")
 
 
-WEB_MENTION_SOURCES = ("Busca web", "GitHub público", "Mwmbl", "Arquivo.pt")
+WEB_MENTION_SOURCES = ("Busca web", "GitHub público", "Mwmbl", "Arquivo.pt", "Denúncias BR")
 MWMBL_LOCK = Lock()
 MWMBL_NEXT = 0.0
 

@@ -45,7 +45,7 @@ docker compose up -d osint
 
 ## Investigate a case
 
-1. Enter up to 20 inputs, one per line. Supported inputs include IPv4, IPv6, CIDR ranges, domains, URLs, hashes, emails, CVEs, ASNs, crypto wallets (BTC/ETH), APT group names and aliases, and free-text search terms. Defanged input (`hxxp`, `[.]`, `[at]`) is normalized automatically, keeping the original. Prefix ambiguous types: `ua:`, `ja3:`, `jarm:`, `imphash:`, `ssdeep:`, `file:`, `mutex:`.
+1. Enter up to 20 inputs, one per line. Supported inputs include IPv4, IPv6, CIDR ranges, domains, URLs, hashes, emails, CVEs, ASNs, crypto wallets (BTC/ETH/Monero/Tron), Brazilian PIX keys, IBANs, bank accounts, APT group names and aliases, and free-text search terms. Defanged input (`hxxp`, `[.]`, `[at]`) is normalized automatically, keeping the original. Prefix ambiguous types: `ua:`, `ja3:`, `jarm:`, `imphash:`, `ssdeep:`, `file:`, `mutex:`, `wallet:`, `pix:`, `iban:`, `conta:`.
 2. Follow **Live activity** or browse the **Relationship graph**. Select a node to open the evidence panel. Drag the background to pan, and use the zoom controls or **Fit graph** to navigate.
 3. Use **Case assessment** below the graph to review the conclusion, claims, hypotheses, and cited evidence. The orange confidence badge explains the score on a 0–5 scale. Each evidence item carries an Admiralty code (e.g. `B2`): a source-reliability letter from `reliability.json` and an information-credibility number. A text match confirms the term is present, not that the claim is true.
 4. Confirm or reject individual evidence items. If you reject a cited item, the assessment and its confidence become out of date. **Reassess case** uses the stored evidence. **Run investigation again** searches confirmed entities when available and otherwise uses the original targets.
@@ -72,6 +72,13 @@ docker compose up -d osint
 | Shodan | Observed public IP services, with an optional `SHODAN_API_KEY` |
 | ThreatFox | Public IOC associations, with an optional `THREATFOX_AUTH_KEY` |
 | CISA KEV | Known exploited vulnerabilities for CVE seeds (downloaded catalog) |
+| OFAC SDN | Sanctioned crypto wallets, matched locally against the Treasury SDN list (GitHub extract fallback) |
+| Chainabuse | Community scam reports for a wallet, aggregated by category, with `CHAINABUSE_API_KEY` |
+| Ransomwhere | Ransom-payment wallets (family and USD received), matched against the downloaded dataset |
+| mempool.space | On-chain balance and transaction count for a BTC wallet (no key) |
+| Etherscan | On-chain balance and first-seen for an ETH wallet, with `ETHERSCAN_API_KEY` |
+| Validação local | Offline validation of PIX keys (CPF/CNPJ/email/phone/EVP) and IBAN (mod-97); nothing leaves the machine |
+| Denúncias BR | Scam-report mentions of a PIX key or account on Brazilian complaint portals (low reliability) |
 | Feodo Tracker | Botnet C2 IPs (downloaded blocklist) |
 | URLhaus | Malicious URLs hosted on a domain or IP |
 | MalwareBazaar | Known malware samples for a hash |
@@ -83,6 +90,16 @@ docker compose up -d osint
 | urlscan | Submitted scans for a domain, URL, or IP, with `URLSCAN_API_KEY` |
 | Censys | Observed services for an IP, with `CENSYS_API_ID` and `CENSYS_API_SECRET` |
 | CIRCL pDNS | Passive DNS records, with `CIRCL_PDNS_USER` and `CIRCL_PDNS_PASSWORD` |
+
+### Financial-fraud indicators
+
+Crypto wallets have strong open attribution: OFAC sanctions (authoritative), Chainabuse reports, the
+Ransomwhere dataset, and on-chain explorers. Fiat indicators are weaker on purpose. There is **no open
+bulk feed of fraudulent PIX keys or bank accounts** — Brazil's Central Bank fraud-marking is a per-key,
+access-controlled DICT lookup, not an open API. For PIX and accounts OpenInvestigation therefore offers
+deterministic offline validation (CPF/CNPJ/IBAN) plus low-reliability scam-report mentions, not a
+definitive "this account is fraud" verdict. PIX keys can be personal data (CPF, phone, email); handle and
+export accordingly.
 
 The default SearXNG configuration excludes DuckDuckGo because of recurring CAPTCHAs. Independent sources continue when a web engine is unavailable. OpenInvestigation checks accessible public HTTPS pages for textual matches and keeps unavailable pages as indexed evidence. An automatic expansion round can look up up to six indicators and two names extracted from verified pages. IOC lookups query passive data providers, and linked detection rules remain references.
 
