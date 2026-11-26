@@ -23,12 +23,12 @@ CATALOG_SOURCES = frozenset({"MITRE ATT&CK", "MISP Galaxy", "CIRCL OSINT", "Thre
 WEB_SEARCH_SOURCES = frozenset({
     "Busca web", "GitHub público", "Mwmbl", "Arquivo.pt",
     "Relatórios históricos na web", "Menções públicas", "Official cybercrime publications",
-    "Denúncias BR",
+    "Denúncias BR", "Dorks de fraude",
 })
 REPUTATION_SOURCES = frozenset({"VirusTotal", "Shodan", "ThreatFox", "Ransomware.live",
                                 "URLhaus", "MalwareBazaar", "RDAP", "crt.sh", "RIPEstat",
                                 "OTX", "GreyNoise", "urlscan", "Censys", "CIRCL pDNS", "Chainabuse",
-                                "mempool.space", "Etherscan"})
+                                "mempool.space", "Etherscan", "Ahmia", "RansomLook", "IntelX"})
 LLM_SOURCES = frozenset({"OpenCode"})
 ALL_SOURCES = LOCAL_SOURCES | CATALOG_SOURCES | WEB_SEARCH_SOURCES | REPUTATION_SOURCES | LLM_SOURCES
 

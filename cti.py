@@ -1540,10 +1540,13 @@ def configured_sources():
     if os.getenv("OSINT_WEB", "1") == "1":
         sources.extend(("CIRCL OSINT", "ThreatDefence", "MITRE ATT&CK", "GitHub público", "Mwmbl", "Arquivo.pt",
                         "MISP Galaxy", "CISA KEV", "Feodo Tracker", "URLhaus", "MalwareBazaar",
-                        "OFAC SDN", "Ransomwhere", "mempool.space", "RDAP", "crt.sh", "RIPEstat"))
+                        "OFAC SDN", "Ransomwhere", "mempool.space", "Ahmia", "RansomLook",
+                        "RDAP", "crt.sh", "RIPEstat"))
         if os.getenv("OSINT_SEARCH_URL"):
             sources.extend(("Relatórios históricos na web", "Menções públicas", "Busca web",
-                            "Official cybercrime publications", "Denúncias BR"))
+                            "Official cybercrime publications", "Denúncias BR", "Dorks de fraude"))
+        if os.getenv("INTELX_API_KEY", "").strip():
+            sources.append("IntelX")
         if os.getenv("RANSOMWARE_LIVE_API_KEY", "").strip():
             sources.append("Ransomware.live")
         if assessment_models():
@@ -1587,6 +1590,118 @@ def br_fraud_mentions(terms):
                 continue
             yield relation(seed, "Denúncia", (title.strip()[:220] or host), "Denúncia pública (Brasil)",
                            "Denúncias BR", reference=url, detail=snippet[:600], confidence="A conferir")
+
+
+FRAUD_DORK_SCOPES = (
+    " (golpe OR fraude OR scam OR estelionato OR carding OR laranja OR vazamento OR dump OR leak)",
+    " (site:pastebin.com OR site:justpaste.it OR site:rentry.co OR site:telegra.ph OR site:controlc.com)",
+    " site:t.me",
+    " (filetype:txt OR filetype:csv OR filetype:json)",
+    " (site:bitcointalk.org OR site:reddit.com)",
+)
+FRAUD_TERM_KINDS = ("Wallet", "PIX", "IBAN", "Conta")
+
+
+def fraud_dorks(terms):
+    """Curated dork pack: where a fraud indicator is exposed in indexed pastes, channels, and dumps."""
+    from collectors import SearchEnginesUnavailable, web_search
+    failures = []
+    for seed in [row for row in terms if row["kind"] in FRAUD_TERM_KINDS][:SEED_SCAN_LIMIT]:
+        phrase = " ".join(seed["value"].replace('"', " ").split())
+        if not phrase:
+            continue
+        pattern = re.compile(r"(?<!\w)" + re.escape(phrase) + r"(?!\w)", re.I)
+        seen = set()
+        for scope in FRAUD_DORK_SCOPES:
+            try:
+                for title, url, excerpt in web_search(f'"{phrase}"{scope}'):
+                    reference = clean_url(url)
+                    snippet = excerpt.partition(" · ")[2]
+                    if not reference or reference in seen or not isinstance(title, str):
+                        continue
+                    if not pattern.search(title + " " + snippet):
+                        continue
+                    seen.add(reference)
+                    yield relation(seed, "Exposição", (title.strip()[:220] or urlsplit(reference).hostname),
+                                   "Indicador de fraude exposto", "Dorks de fraude", reference=reference,
+                                   detail=snippet[:600], confidence="A conferir", target_id=reference)
+            except (OSError, ValueError, SearchEnginesUnavailable) as error:
+                failures.append(error)
+    if failures:
+        raise failures[0]
+
+
+AHMIA_SEARCH = "https://ahmia.fi/search/?"
+AHMIA_RESULT_LIMIT = 8  # onion results read from one Ahmia response
+RANSOMLOOK = "https://www.ransomlook.io/api/search/"
+INTELX_HOST = "https://2.intelx.io"
+ONION_URL = r"https?://[a-z2-7]{16,56}\.onion[^\s<\"]*"
+
+
+def ahmia_matches(terms):
+    """Full-text search of Tor hidden services over clearnet (Ahmia filters CSAM via its own blacklist)."""
+    from collectors import clean
+    for seed in [row for row in terms if row["kind"] in FRAUD_TERM_KINDS][:SEED_SCAN_LIMIT]:
+        try:
+            html = download(AHMIA_SEARCH + urlencode({"q": seed["value"]}), limit=2_000_000).decode("utf-8", "replace")
+        except (OSError, ValueError):
+            continue
+        for block in re.findall(r'<li class="result"[^>]*>(.*?)</li>', html, re.S)[:AHMIA_RESULT_LIMIT]:
+            onion = re.search(ONION_URL, block, re.I)
+            if not onion:
+                continue
+            title_match = re.search(r"<a [^>]*>(.*?)</a>", block, re.S)
+            snippet_match = re.search(r"<p>(.*?)</p>", block, re.S)
+            title = clean(title_match.group(1)) if title_match else ""
+            snippet = clean(snippet_match.group(1)) if snippet_match else ""
+            yield relation(seed, "Exposição (dark)", (title[:220] or onion.group(0)[:220]),
+                           "Menção em serviço onion (Ahmia)", "Ahmia", reference=onion.group(0),
+                           detail=snippet[:600], confidence="A conferir")
+
+
+def ransomlook_matches(terms):
+    """Leak-site / ransomware-ecosystem matches from the open RansomLook tracker (clearnet API)."""
+    for seed in [row for row in terms if row["kind"] in ("Wallet", "Termo", "Grupo")][:SEED_SCAN_LIMIT]:
+        try:
+            data = json.loads(download(RANSOMLOOK + quote(seed["value"], safe=""), limit=2_000_000))
+        except (OSError, ValueError):
+            continue
+        for row in data if isinstance(data, list) else []:
+            if not isinstance(row, dict):
+                continue
+            group, title = str(row.get("group_name") or ""), str(row.get("post_title") or "")
+            if not group and not title:
+                continue
+            yield relation(seed, "Vazamento", (title[:220] or group[:220]),
+                           "Correspondência em leak-site (RansomLook)", "RansomLook",
+                           date=str(row.get("discovered") or "")[:10], reference="https://www.ransomlook.io/",
+                           detail=f"Grupo: {group}"[:600] if group else "", confidence="A conferir")
+
+
+def intelx_matches(terms, key):
+    """Best-effort IntelX intelligent search (paste/leak/darknet index). Keyed; free tier is limited."""
+    headers = {"x-key": key, "User-Agent": egress.user_agent(), "Accept": "application/json"}
+    for seed in [row for row in terms if row["kind"] in FRAUD_TERM_KINDS][:SEED_SCAN_LIMIT]:
+        body = json.dumps({"term": seed["value"], "maxresults": 10, "media": 0, "sort": 2, "terminate": []}).encode()
+        request = Request(INTELX_HOST + "/intelligent/search", data=body,
+                          headers={**headers, "Content-Type": "application/json"})
+        try:
+            with build_opener(NoRedirects(), *egress.proxy_handlers()).open(request, timeout=10) as response:
+                search_id = json.loads(response.read(100_000)).get("id")
+        except (OSError, ValueError):
+            continue
+        if not search_id:
+            continue
+        result = provider_json(f"{INTELX_HOST}/intelligent/search/result?id={quote(str(search_id), safe='')}", headers, "IntelX")
+        for row in array(result.get("records")) if isinstance(result, dict) else []:
+            if not isinstance(row, dict):
+                continue
+            name, bucket = str(row.get("name") or ""), str(row.get("bucket") or "")
+            if not name and not bucket:
+                continue
+            yield relation(seed, "Exposição", (name[:220] or bucket[:220]), "Registro indexado (IntelX)",
+                           "IntelX", date=str(row.get("date") or "")[:10],
+                           detail=f"Bucket: {bucket}"[:600] if bucket else "", confidence="A conferir")
 
 
 def keyword_matches(terms):
@@ -1764,7 +1879,7 @@ def ransomware_live_matches(terms, key):
                            confidence="Unverified claims")
 
 
-WEB_MENTION_SOURCES = ("Busca web", "GitHub público", "Mwmbl", "Arquivo.pt", "Denúncias BR")
+WEB_MENTION_SOURCES = ("Busca web", "GitHub público", "Mwmbl", "Arquivo.pt", "Denúncias BR", "Dorks de fraude")
 MWMBL_LOCK = Lock()
 MWMBL_NEXT = 0.0
 

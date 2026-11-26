@@ -79,6 +79,10 @@ docker compose up -d osint
 | Etherscan | On-chain balance and first-seen for an ETH wallet, with `ETHERSCAN_API_KEY` |
 | Validação local | Offline validation of PIX keys (CPF/CNPJ/email/phone/EVP) and IBAN (mod-97); nothing leaves the machine |
 | Denúncias BR | Scam-report mentions of a PIX key or account on Brazilian complaint portals (low reliability) |
+| Dorks de fraude | Curated dork pack (paste sites, Telegram, filetype dumps, scam context) for a fraud indicator |
+| Ahmia | Full-text mentions of a fraud indicator on Tor hidden services, over clearnet (CSAM-filtered) |
+| RansomLook | Leak-site / ransomware-ecosystem matches for a wallet or actor name (clearnet API) |
+| IntelX | Paste/leak/darknet index, with `INTELX_API_KEY` (optional; free tier is very limited) |
 | Feodo Tracker | Botnet C2 IPs (downloaded blocklist) |
 | URLhaus | Malicious URLs hosted on a domain or IP |
 | MalwareBazaar | Known malware samples for a hash |
@@ -100,6 +104,12 @@ access-controlled DICT lookup, not an open API. For PIX and accounts OpenInvesti
 deterministic offline validation (CPF/CNPJ/IBAN) plus low-reliability scam-report mentions, not a
 definitive "this account is fraud" verdict. PIX keys can be personal data (CPF, phone, email); handle and
 export accordingly.
+
+Beyond the open clearnet, a dork pack (`Dorks de fraude`) targets indexed pastes, Telegram, and dumps,
+and dark-web mentions are reached **over clearnet** via Ahmia (Tor hidden-service search), RansomLook
+(ransomware leak sites), and optionally IntelX. Fetching `.onion` directly is out of scope: the egress
+layer rejects SOCKS by design, so Tor would need a deliberate proxy redesign, opsec, and authorization.
+These sources surface where an indicator appears — they never download or redistribute leaked data.
 
 The default SearXNG configuration excludes DuckDuckGo because of recurring CAPTCHAs. Independent sources continue when a web engine is unavailable. OpenInvestigation checks accessible public HTTPS pages for textual matches and keeps unavailable pages as indexed evidence. An automatic expansion round can look up up to six indicators and two names extracted from verified pages. IOC lookups query passive data providers, and linked detection rules remain references.
 

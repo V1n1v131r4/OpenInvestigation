@@ -83,6 +83,7 @@ class ThreatIntelligence(unittest.TestCase):
         self.enter(patch.object(cti, "open_index_mentions", return_value=[]))
         self.enter(patch.object(cti, "cached_feed", return_value=b'{"values":[]}'))
         self.enter(patch.object(cti, "provider_json", return_value={"items": []}))
+        self.enter(patch.object(cti, "download", return_value=b"[]"))  # RansomLook/Ahmia stay inert offline
         search = self.enter(patch.object(collectors, "web_search", return_value=[
             ("ARTEX no GitHub", "https://github.com/example/ARTEX", "Consulta · Repositório público"),
             ("Artexx", "https://example.org/other", "Consulta · Menção a Artexx"),
@@ -112,6 +113,7 @@ class ThreatIntelligence(unittest.TestCase):
         self.enter(patch.object(cti, "attack_bundle", return_value=[]))
         self.enter(patch.object(cti, "open_index_mentions", return_value=[]))
         self.enter(patch.object(cti, "cached_feed", return_value=b'{"values":[]}'))
+        self.enter(patch.object(cti, "download", return_value=b"[]"))  # RansomLook/Ahmia stay inert offline
         self.enter(patch.object(collectors, "web_search", side_effect=collectors.SearchEnginesUnavailable(
             [["duckduckgo", "CAPTCHA"]])))
         github = self.enter(patch.object(cti, "provider_json", return_value={"items": [
@@ -668,6 +670,32 @@ class ThreatIntelligence(unittest.TestCase):
         self.assertEqual(len(found), 1)  # off-scope host dropped
         self.assertEqual((found[0]["source"], found[0]["relationship"]), ("Denúncias BR", "Denúncia pública (Brasil)"))
         self.assertTrue(found[0]["reference"].startswith("https://www.reclameaqui.com.br"))
+
+    def test_fraud_dorks_match_indicator_offline(self):
+        import collectors
+        self.enter(patch.object(collectors, "web_search", return_value=[
+            ("Dump com PIX", "https://pastebin.com/abc", "Query · chave 390.533.447-05 em lista de laranjas"),
+            ("Sem relação", "https://pastebin.com/zzz", "Query · texto qualquer")]))
+        found = list(cti.fraud_dorks(cti.parse_seeds("pix:390.533.447-05")))
+        self.assertTrue(found)
+        self.assertEqual((found[0]["source"], found[0]["relationship"]), ("Dorks de fraude", "Indicador de fraude exposto"))
+        self.assertTrue(all("390.533.447-05" in row["detail"] for row in found))
+
+    def test_ahmia_parses_onion_results_offline(self):
+        html = ('<ol><li class="result" data-v="1"><h4><a href="/search/redirect?redirect_url=x">Leak Market</a></h4>'
+                '<cite>http://abcdefghij234567.onion/leak</cite><p>chave 390.533.447-05 listada</p></li></ol>').encode()
+        self.enter(patch.object(cti, "download", return_value=html))
+        found = list(cti.ahmia_matches(cti.parse_seeds("pix:390.533.447-05")))
+        self.assertEqual((found[0]["source"], found[0]["target"]), ("Ahmia", "Leak Market"))
+        self.assertTrue(found[0]["reference"].endswith(".onion/leak"))
+
+    def test_ransomlook_matches_term_offline(self):
+        import json
+        self.enter(patch.object(cti, "download", return_value=json.dumps(
+            [{"group_name": "LockBit", "post_title": "victim-corp", "discovered": "2024-10-05 12:00:00"}]).encode()))
+        found = list(cti.ransomlook_matches(cti.parse_seeds("LockBit")))
+        self.assertEqual((found[0]["source"], found[0]["target"]), ("RansomLook", "victim-corp"))
+        self.assertEqual(found[0]["date"], "2024-10-05")
 
     def test_fiat_validators_offline(self):
         self.assertTrue(cti.cpf_valid("390.533.447-05"))
