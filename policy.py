@@ -17,16 +17,18 @@ Passive mode (any TLP): only local + catalog; no search, no per-seed reputation,
 TLP_LEVELS = ("CLEAR", "GREEN", "AMBER", "RED")
 DEFAULT_TLP = "AMBER"
 
-LOCAL_SOURCES = frozenset({"MISP local", "Histórico local"})
+LOCAL_SOURCES = frozenset({"MISP local", "Histórico local", "Validação local"})
 CATALOG_SOURCES = frozenset({"MITRE ATT&CK", "MISP Galaxy", "CIRCL OSINT", "ThreatDefence",
-                             "CISA KEV", "Feodo Tracker"})
+                             "CISA KEV", "Feodo Tracker", "OFAC SDN", "Ransomwhere"})
 WEB_SEARCH_SOURCES = frozenset({
     "Busca web", "GitHub público", "Mwmbl", "Arquivo.pt",
     "Relatórios históricos na web", "Menções públicas", "Official cybercrime publications",
+    "Denúncias BR", "Dorks de fraude",
 })
 REPUTATION_SOURCES = frozenset({"VirusTotal", "Shodan", "ThreatFox", "Ransomware.live",
                                 "URLhaus", "MalwareBazaar", "RDAP", "crt.sh", "RIPEstat",
-                                "OTX", "GreyNoise", "urlscan", "Censys", "CIRCL pDNS"})
+                                "OTX", "GreyNoise", "urlscan", "Censys", "CIRCL pDNS", "Chainabuse",
+                                "mempool.space", "Etherscan", "Ahmia", "RansomLook", "IntelX"})
 LLM_SOURCES = frozenset({"OpenCode"})
 ALL_SOURCES = LOCAL_SOURCES | CATALOG_SOURCES | WEB_SEARCH_SOURCES | REPUTATION_SOURCES | LLM_SOURCES
 

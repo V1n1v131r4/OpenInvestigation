@@ -6,6 +6,23 @@ semantic versioning once releases are tagged.
 
 ## [Unreleased]
 
+### Added
+
+- Financial-fraud threat-actor research. Crypto wallets gained dedicated sources: OFAC SDN sanctioned
+  addresses (official Treasury XML with a GitHub-extract fallback, matched locally), Chainabuse community
+  scam reports (`CHAINABUSE_API_KEY`), the Ransomwhere ransom-payment dataset, and on-chain explorers
+  mempool.space (BTC, keyless) and Etherscan (ETH, `ETHERSCAN_API_KEY`). Address autodetection now covers
+  Monero and Tron, plus a `wallet:` prefix to force any chain.
+- Brazilian fiat indicators via `pix:`, `iban:`, and `conta:` prefixes, with deterministic offline
+  validation (CPF/CNPJ check digits, IBAN mod-97, PIX key-type classification) and low-reliability
+  scam-report mentions from Brazilian complaint portals. Wallets and fiat keys are exported as
+  `cryptocurrency-wallet` / `x-financial-account` STIX observables. There is no open bulk feed of
+  fraudulent PIX keys or accounts; see the README for the limitation.
+- Exposure scanning for fraud indicators: a curated dork pack (`Dorks de fraude`) over paste sites,
+  Telegram, and filetype dumps, plus dark-web mentions reached over clearnet via Ahmia (Tor hidden-service
+  search), RansomLook (ransomware leak sites), and optional IntelX (`INTELX_API_KEY`). Direct `.onion`
+  fetching is intentionally out of scope (the egress layer rejects SOCKS).
+
 ### Changed
 
 - Replaced the OpenCode CLI with direct HTTP calls to OpenAI and Anthropic for the model

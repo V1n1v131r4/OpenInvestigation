@@ -119,7 +119,10 @@ def cti_stage(case_id, source, callback, terms=None):
 def submit_cti_iocs(case_id, seeds, entries, sources):
     values = [seed["value"] for seed in seeds]
     tasks = [COLLECTORS.submit(cti_stage, case_id, "MISP local", lambda: cti.misp_matches(seeds, entries), values)]
+    if "Validação local" in sources and any(seed["kind"] in ("PIX", "IBAN", "Conta") for seed in seeds):
+        tasks.append(COLLECTORS.submit(cti_stage, case_id, "Validação local", lambda: cti.fiat_validation_matches(seeds), values))
     has_iocs = any(seed["kind"] in ("IP", "URL", "Domínio", "Hash") for seed in seeds)
+    has_wallet = any(seed["kind"] == "Wallet" for seed in seeds)
     if "Histórico local" in sources and has_iocs:
         tasks.append(COLLECTORS.submit(cti_stage, case_id, "Histórico local", lambda: cti.local_history_matches(seeds), values))
     if "Relatórios históricos na web" in sources and has_iocs:
@@ -137,13 +140,19 @@ def submit_cti_iocs(case_id, seeds, entries, sources):
         tasks.append(COLLECTORS.submit(cti_stage, case_id, "URLhaus", lambda: cti.urlhaus_matches(seeds), values))
     if "MalwareBazaar" in sources and any(seed["kind"] == "Hash" for seed in seeds):
         tasks.append(COLLECTORS.submit(cti_stage, case_id, "MalwareBazaar", lambda: cti.malwarebazaar_matches(seeds), values))
+    if "OFAC SDN" in sources and any(seed["kind"] == "Wallet" for seed in seeds):
+        tasks.append(COLLECTORS.submit(cti_stage, case_id, "OFAC SDN", lambda: cti.ofac_sanctions_matches(seeds), values))
+    if "Ransomwhere" in sources and has_wallet:
+        tasks.append(COLLECTORS.submit(cti_stage, case_id, "Ransomwhere", lambda: cti.ransomwhere_matches(seeds), values))
+    if "mempool.space" in sources and has_wallet:
+        tasks.append(COLLECTORS.submit(cti_stage, case_id, "mempool.space", lambda: cti.mempool_matches(seeds), values))
     if "RDAP" in sources and any(seed["kind"] in ("IP", "Domínio", "ASN") for seed in seeds):
         tasks.append(COLLECTORS.submit(cti_stage, case_id, "RDAP", lambda: cti.rdap_matches(seeds), values))
     if "crt.sh" in sources and any(seed["kind"] == "Domínio" for seed in seeds):
         tasks.append(COLLECTORS.submit(cti_stage, case_id, "crt.sh", lambda: cti.crtsh_matches(seeds), values))
     if "RIPEstat" in sources and any(seed["kind"] in ("IP", "ASN") for seed in seeds):
         tasks.append(COLLECTORS.submit(cti_stage, case_id, "RIPEstat", lambda: cti.ripestat_matches(seeds), values))
-    if has_iocs:
+    if has_iocs or has_wallet:
         for source, (variable, collector) in cti.authenticated_sources().items():
             if source in sources:
                 tasks.append(COLLECTORS.submit(cti_stage, case_id, source,
@@ -165,6 +174,18 @@ def submit_cti_mentions(case_id, terms, sources):
         key = os.environ["RANSOMWARE_LIVE_API_KEY"].strip()
         tasks.append(COLLECTORS.submit(cti_stage, case_id, "Ransomware.live",
                                        lambda: cti.ransomware_live_matches(terms, key), values))
+    if "Denúncias BR" in sources and any(seed["kind"] in ("PIX", "IBAN", "Conta") for seed in terms):
+        tasks.append(COLLECTORS.submit(cti_stage, case_id, "Denúncias BR", lambda: cti.br_fraud_mentions(terms), values))
+    has_fraud = any(seed["kind"] in ("Wallet", "PIX", "IBAN", "Conta") for seed in terms)
+    if "Dorks de fraude" in sources and has_fraud:
+        tasks.append(COLLECTORS.submit(cti_stage, case_id, "Dorks de fraude", lambda: cti.fraud_dorks(terms), values))
+    if "Ahmia" in sources and has_fraud:
+        tasks.append(COLLECTORS.submit(cti_stage, case_id, "Ahmia", lambda: cti.ahmia_matches(terms), values))
+    if "RansomLook" in sources and any(seed["kind"] in ("Wallet", "Termo", "Grupo") for seed in terms):
+        tasks.append(COLLECTORS.submit(cti_stage, case_id, "RansomLook", lambda: cti.ransomlook_matches(terms), values))
+    if "IntelX" in sources and has_fraud and os.getenv("INTELX_API_KEY", "").strip():
+        tasks.append(COLLECTORS.submit(cti_stage, case_id, "IntelX",
+                                       lambda: cti.intelx_matches(terms, os.environ["INTELX_API_KEY"].strip()), values))
     return tasks
 
 
@@ -197,7 +218,7 @@ def run_cti(case_id, seeds):
     available = cti.configured_sources()
     sources = policy.effective_sources(available, tlp, passive, overrides)
     tasks = submit_cti_iocs(case_id, seeds, entries, sources)
-    terms = [seed for seed in seeds if seed["kind"] in ("Termo", "Grupo")]
+    terms = [seed for seed in seeds if seed["kind"] in ("Termo", "Grupo", "Wallet", "PIX", "IBAN", "Conta")]
     missing_search = (bool(terms) and os.getenv("OSINT_WEB", "1") == "1"
                       and policy.permits_source("Busca web", tlp, passive, overrides)
                       and "Busca web" not in available)

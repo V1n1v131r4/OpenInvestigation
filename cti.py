@@ -86,6 +86,10 @@ SEED_PREFIXES = (
     ("ssdeep:", "Ssdeep", r"\d{1,10}:[A-Za-z0-9/+]{3,200}:[A-Za-z0-9/+]{3,200}"),
     ("file:", "Filename", r".{1,255}"),
     ("mutex:", "Mutex", r".{1,255}"),
+    ("wallet:", "Wallet", None),  # force any chain (Litecoin, Solana, …) that autodetect skips
+    ("pix:", "PIX", None),        # Brazilian PIX key (CPF/CNPJ/email/phone/EVP); classified on validation
+    ("iban:", "IBAN", r"[A-Za-z]{2}\d{2}[A-Za-z0-9]{10,30}"),
+    ("conta:", "Conta", r".{1,64}"),
 )
 DOMAIN_PATTERN = r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z][A-Za-z0-9-]{1,62}"
 
@@ -106,6 +110,8 @@ def indicator(value):
     for prefix, kind, pattern in SEED_PREFIXES:
         if low.startswith(prefix):
             rest = value[len(prefix):].strip()
+            if kind == "IBAN":
+                rest = re.sub(r"\s", "", rest).upper()  # IBANs are often written in 4-char groups
             if not rest or (pattern and not re.fullmatch(pattern, rest)):
                 return None
             return kind, rest.lower() if kind in ("JA3", "JARM", "Imphash") else rest
@@ -135,6 +141,10 @@ def indicator(value):
     if re.fullmatch(r"[a-fA-F0-9]{32}|[a-fA-F0-9]{40}|[a-fA-F0-9]{64}", value):
         return "Hash", value.lower()
     if re.fullmatch(r"bc1[ac-hj-np-z02-9]{11,71}", value) or re.fullmatch(r"[13][a-km-zA-HJ-NP-Z1-9]{25,34}", value):
+        return "Wallet", value
+    if re.fullmatch(r"[48][0-9A-Za-z]{94}", value):  # Monero (starts 4/8, 95 chars)
+        return "Wallet", value
+    if re.fullmatch(r"T[1-9A-HJ-NP-Za-km-z]{33}", value):  # Tron (base58, starts T)
         return "Wallet", value
     try:
         parsed = urlsplit(value)
@@ -528,6 +538,13 @@ CISA_KEV = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulne
 FEODO = "https://feodotracker.abuse.ch/downloads/ipblocklist.json"
 URLHAUS_HOST = "https://urlhaus-api.abuse.ch/v1/host/"
 MALWAREBAZAAR = "https://mb-api.abuse.ch/api/v1/"
+# Sanctioned digital-currency addresses. Primary: the official Treasury SDN XML (entity name +
+# program in the remarks). Fallback: the nightly per-chain extract maintained from the same SDN.
+OFAC_SDN_XML = "https://www.treasury.gov/ofac/downloads/sdn.xml"
+OFAC_GITHUB = "https://raw.githubusercontent.com/0xB10C/ofac-sanctioned-digital-currency-addresses/lists/sanctioned_addresses_{}.json"
+OFAC_SEARCH = "https://sanctionssearch.ofac.treas.gov/"
+OFAC_CURRENCIES = ("XBT", "ETH", "USDT", "USDC", "BSC", "ARB", "ETC", "BCH", "BTG", "BSV",
+                   "LTC", "XMR", "TRX", "SOL", "XRP", "DASH", "ZEC", "XVG")
 
 
 def abuse_post(url, fields, source, key=None):
@@ -572,6 +589,164 @@ def cisa_kev_matches(seeds):
                        "Listed in CISA KEV", "CISA KEV", date=str(row.get("dateAdded") or "")[:10],
                        reference="https://www.cisa.gov/known-exploited-vulnerabilities-catalog",
                        detail=detail, confidence="Documentada pela fonte")
+
+
+def _ofac_github_index():
+    """Fallback: per-chain address lists maintained nightly from the same SDN. Addresses only."""
+    index = {}
+    for currency in OFAC_CURRENCIES:
+        try:
+            data = json.loads(cached_feed(OFAC_GITHUB.format(currency), 4_000_000))
+        except (OSError, ValueError):
+            continue
+        for address in data if isinstance(data, list) else []:
+            if isinstance(address, str) and address.strip():
+                index.setdefault(address.strip(), {"name": "", "program": "", "currency": currency})
+    return index
+
+
+def _ofac_index():
+    """address -> {name, program, currency} from the official SDN; GitHub extract on any failure.
+
+    The classic SDN XML carries digital-currency addresses in each entry's free-text remarks as
+    'Digital Currency Address - <TICKER> <address>'. We read name/program per <sdnEntry> chunk and
+    attach every address found in that chunk, so a hit reports who is sanctioned, not just that it is.
+    """
+    try:
+        blob = cached_feed(OFAC_SDN_XML, 80_000_000).decode("utf-8", "replace")
+    except (OSError, ValueError):
+        return _ofac_github_index()
+    index = {}
+    for chunk in re.split(r"<sdnEntry>", blob)[1:]:
+        addresses = re.findall(r"Digital Currency Address - (\w+)\s+([1-9A-HJ-NP-Za-km-z0-9x]{16,120})", chunk)
+        if not addresses:
+            continue
+        last = re.search(r"<lastName>([^<]*)</lastName>", chunk)
+        first = re.search(r"<firstName>([^<]*)</firstName>", chunk)
+        name = " ".join(part.group(1).strip() for part in (first, last) if part and part.group(1).strip())
+        program = ", ".join(dict.fromkeys(re.findall(r"<program>([^<]*)</program>", chunk)))
+        for currency, address in addresses:
+            index.setdefault(address, {"name": name, "program": program, "currency": currency})
+    return index or _ofac_github_index()
+
+
+def ofac_sanctions_matches(seeds):
+    wallets = {seed["value"]: seed for seed in seeds if seed["kind"] == "Wallet"}
+    if not wallets:
+        return
+    index = _ofac_index()
+    lowered = {key.lower(): value for key, value in index.items()}  # EVM addresses compare case-insensitively
+    for value, seed in wallets.items():
+        hit = index.get(value) or (lowered.get(value.lower()) if value.startswith("0x") else None)
+        if not hit:
+            continue
+        detail = " · ".join(filter(None, [f"Moeda: {hit['currency']}" if hit.get("currency") else "",
+                                          f"Programa: {hit['program']}" if hit.get("program") else "",
+                                          "Lista OFAC SDN (Tesouro dos EUA)"]))
+        yield relation(seed, "Sanção", (hit.get("name") or "Entidade sancionada")[:200],
+                       "Endereço sancionado (OFAC SDN)", "OFAC SDN", reference=OFAC_SEARCH,
+                       detail=detail[:600], confidence="Documented by source")
+
+
+RANSOMWHERE = "https://api.ransomwhe.re/export"
+
+
+def ransomwhere_matches(seeds):
+    wallets = {seed["value"]: seed for seed in seeds if seed["kind"] == "Wallet"}
+    if not wallets:
+        return
+    data = json.loads(cached_feed(RANSOMWHERE, 96_000_000))
+    index = {}
+    for row in array(data.get("result")) if isinstance(data, dict) else []:
+        if isinstance(row, dict) and isinstance(row.get("address"), str):
+            index.setdefault(row["address"], row)
+    lowered = {key.lower(): value for key, value in index.items()}
+    for value, seed in wallets.items():
+        row = index.get(value) or (lowered.get(value.lower()) if value.startswith("0x") else None)
+        if not row:
+            continue
+        usd = row.get("balanceUSD")
+        detail = " · ".join(filter(None, [f"Blockchain: {row.get('blockchain')}" if row.get("blockchain") else "",
+                                          f"Recebido: ~US$ {usd:,.0f}" if isinstance(usd, (int, float)) else "",
+                                          "Dataset Ransomwhere"]))
+        yield relation(seed, "Ransomware", str(row.get("family") or "Ransomware")[:200],
+                       "Endereço de pagamento de ransomware (Ransomwhere)", "Ransomwhere",
+                       date=str(row.get("createdAt") or "")[:10], reference="https://ransomwhe.re/",
+                       detail=detail[:600], confidence="Reportado pela fonte")
+
+
+def cpf_valid(value):
+    digits = re.sub(r"\D", "", value)
+    if len(digits) != 11 or len(set(digits)) == 1:
+        return False
+    for size in (9, 10):
+        total = sum(int(digits[i]) * ((size + 1) - i) for i in range(size))
+        if (total * 10 % 11) % 10 != int(digits[size]):
+            return False
+    return True
+
+
+def cnpj_valid(value):
+    digits = re.sub(r"\D", "", value)
+    if len(digits) != 14 or len(set(digits)) == 1:
+        return False
+    base_weights = [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]
+    for weights, position in ((base_weights, 12), ([6] + base_weights, 13)):
+        total = sum(int(digits[i]) * weights[i] for i in range(position))
+        check = total % 11
+        if (0 if check < 2 else 11 - check) != int(digits[position]):
+            return False
+    return True
+
+
+def iban_valid(value):
+    compact = re.sub(r"\s", "", value).upper()
+    if not re.fullmatch(r"[A-Z]{2}\d{2}[A-Z0-9]{10,30}", compact):
+        return False
+    rearranged = compact[4:] + compact[:4]
+    return int("".join(str(int(ch, 36)) if ch.isalpha() else ch for ch in rearranged)) % 97 == 1
+
+
+def pix_key_type(value):
+    text = value.strip()
+    if re.fullmatch(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}", text):
+        return "EVP"
+    if re.fullmatch(r"[^@\s]{1,64}@" + DOMAIN_PATTERN, text):
+        return "Email"
+    digits = re.sub(r"\D", "", text)
+    if text.startswith("+") or len(digits) in (12, 13):
+        return "Telefone" if 12 <= len(digits) <= 13 else None
+    if len(digits) == 11 and cpf_valid(text):
+        return "CPF"
+    if len(digits) == 14 and cnpj_valid(text):
+        return "CNPJ"
+    if len(digits) in (10, 11):  # BR phone without country code
+        return "Telefone"
+    return None
+
+
+def fiat_validation_matches(seeds):
+    """Offline, deterministic validation/classification of fiat indicators. Nothing leaves the machine."""
+    for seed in seeds:
+        value = seed["value"]
+        if seed["kind"] == "PIX":
+            subtype = pix_key_type(value)
+            if subtype:
+                yield relation(seed, "Validação", subtype, "Chave PIX válida", "Validação local",
+                               detail="Classificação offline determinística", confidence="Documented by source")
+            else:
+                yield relation(seed, "Validação", "Não classificada", "Chave PIX não reconhecida",
+                               "Validação local", detail="Formato fora de CPF/CNPJ/email/telefone/EVP",
+                               confidence="A conferir")
+        elif seed["kind"] == "IBAN":
+            ok = iban_valid(value)
+            yield relation(seed, "Validação", "Válido" if ok else "Inválido",
+                           "IBAN verificado (mod-97)", "Validação local",
+                           confidence="Documented by source" if ok else "A conferir")
+        elif seed["kind"] == "Conta":
+            yield relation(seed, "Validação", "Formato livre", "Conta bancária informada",
+                           "Validação local", detail="Sem registro aberto para validar titularidade",
+                           confidence="A conferir")
 
 
 def feodo_matches(seeds):
@@ -765,6 +940,96 @@ OTX_PULSE_LIMIT = 8
 URLSCAN_RESULT_LIMIT = 10
 CENSYS_SERVICE_LIMIT = 50
 PDNS_RECORD_LIMIT = 50
+
+
+CHAINABUSE = "https://api.chainabuse.com/v0/reports"
+CHAINABUSE_REPORT_LIMIT = 50  # reports read from one Chainabuse response
+
+
+def _chainabuse_chain(value):
+    """Best-effort chain hint for the screening query; empty when the format is unsupported."""
+    if value.startswith("0x"):
+        return "ETH"
+    if value.startswith(("bc1", "1", "3")):
+        return "BTC"
+    if value.startswith("T"):
+        return "TRON"
+    return ""
+
+
+def chainabuse_matches(seeds, key):
+    token = base64.b64encode(f"{key}:".encode()).decode()  # API key in the username field, blank password
+    for seed in seeds:
+        if seed["kind"] != "Wallet":
+            continue
+        params = {"address": seed["value"]}
+        chain = _chainabuse_chain(seed["value"])
+        if chain:
+            params["chain"] = chain
+        result = provider_json(f"{CHAINABUSE}?{urlencode(params)}", {"Authorization": "Basic " + token}, "Chainabuse")
+        if result is None:
+            continue
+        categories = {}
+        for row in array(result.get("reports"))[:CHAINABUSE_REPORT_LIMIT]:
+            if not isinstance(row, dict):
+                continue
+            category = (str(row.get("scamCategory") or "").strip() or "OTHER").replace("_", " ").title()
+            bucket = categories.setdefault(category, {"count": 0, "latest": ""})
+            bucket["count"] += 1
+            bucket["latest"] = max(bucket["latest"], str(row.get("createdAt") or "")[:10])
+        reference = "https://www.chainabuse.com/address/" + quote(seed["value"], safe="")
+        for category, info in categories.items():
+            yield relation(seed, "Golpe", category[:200], "Reportado como scam (Chainabuse)", "Chainabuse",
+                           date=info["latest"], reference=reference,
+                           detail=f"{info['count']} denúncia(s) comunitária(s) · categoria {category}"[:600],
+                           confidence="A conferir")
+
+
+MEMPOOL = "https://mempool.space/api/address/"
+ETHERSCAN = "https://api.etherscan.io/v2/api"
+BTC_ADDRESS = r"bc1[ac-hj-np-z02-9]{11,71}|[13][a-km-zA-HJ-NP-Z1-9]{25,34}"
+
+
+def mempool_matches(seeds):
+    for seed in seeds:
+        if seed["kind"] != "Wallet" or not re.fullmatch(BTC_ADDRESS, seed["value"]):
+            continue
+        result = provider_json(MEMPOOL + quote(seed["value"], safe=""), {}, "mempool.space")
+        stats = result.get("chain_stats") if isinstance(result, dict) else None
+        if not isinstance(stats, dict):
+            continue
+        funded, spent, txs = stats.get("funded_txo_sum"), stats.get("spent_txo_sum"), stats.get("tx_count")
+        if not all(type(value) is int for value in (funded, spent, txs)) or txs == 0:
+            continue
+        detail = f"Saldo: {(funded - spent) / 1e8:.8f} BTC · Recebido: {funded / 1e8:.8f} BTC · {txs} tx"
+        yield relation(seed, "Carteira", f"{txs} transação(ões) on-chain"[:220],
+                       "Atividade on-chain (mempool.space)", "mempool.space",
+                       reference="https://mempool.space/address/" + quote(seed["value"], safe=""),
+                       detail=detail[:600], confidence="Documented by source")
+
+
+def etherscan_matches(seeds, key):
+    for seed in seeds:
+        if seed["kind"] != "Wallet" or not re.fullmatch(r"0x[a-fA-F0-9]{40}", seed["value"]):
+            continue
+        base = {"chainid": "1", "address": seed["value"], "apikey": key}
+        balance = provider_json(f"{ETHERSCAN}?{urlencode({**base, 'module': 'account', 'action': 'balance', 'tag': 'latest'})}",
+                                {}, "Etherscan")
+        eth = (f"{int(balance['result']) / 1e18:.6f} ETH"
+               if isinstance(balance, dict) and balance.get("status") == "1" and str(balance.get("result", "")).isdigit()
+               else "")
+        history = provider_json(f"{ETHERSCAN}?{urlencode({**base, 'module': 'account', 'action': 'txlist', 'startblock': '0', 'endblock': '99999999', 'page': '1', 'offset': '1', 'sort': 'asc'})}",
+                                {}, "Etherscan")
+        rows = history.get("result") if isinstance(history, dict) else None
+        first = rows[0].get("timeStamp") if isinstance(rows, list) and rows and isinstance(rows[0], dict) else None
+        first_seen = (datetime.fromtimestamp(int(first), timezone.utc).date().isoformat()
+                      if str(first).isdigit() else "")
+        if not eth and not first_seen:
+            continue
+        detail = " · ".join(filter(None, [f"Saldo: {eth}" if eth else "", f"Primeira tx: {first_seen}" if first_seen else ""]))
+        yield relation(seed, "Carteira", "Conta Ethereum", "Atividade on-chain (Etherscan)", "Etherscan",
+                       date=first_seen, reference="https://etherscan.io/address/" + seed["value"],
+                       detail=detail[:600], confidence="Documented by source")
 
 
 def otx_matches(seeds, key):
@@ -1259,6 +1524,8 @@ def historical_web_matches(seeds):
 
 def authenticated_sources():
     return {"ThreatFox": ("THREATFOX_AUTH_KEY", threatfox_matches),
+            "Chainabuse": ("CHAINABUSE_API_KEY", chainabuse_matches),
+            "Etherscan": ("ETHERSCAN_API_KEY", etherscan_matches),
             "VirusTotal": ("VIRUSTOTAL_API_KEY", virustotal_matches),
             "Shodan": ("SHODAN_API_KEY", shodan_matches),
             "OTX": ("OTX_API_KEY", otx_matches),
@@ -1269,13 +1536,17 @@ def authenticated_sources():
 
 
 def configured_sources():
-    sources = ["MISP local", "Histórico local"]
+    sources = ["MISP local", "Histórico local", "Validação local"]
     if os.getenv("OSINT_WEB", "1") == "1":
         sources.extend(("CIRCL OSINT", "ThreatDefence", "MITRE ATT&CK", "GitHub público", "Mwmbl", "Arquivo.pt",
                         "MISP Galaxy", "CISA KEV", "Feodo Tracker", "URLhaus", "MalwareBazaar",
+                        "OFAC SDN", "Ransomwhere", "mempool.space", "Ahmia", "RansomLook",
                         "RDAP", "crt.sh", "RIPEstat"))
         if os.getenv("OSINT_SEARCH_URL"):
-            sources.extend(("Relatórios históricos na web", "Menções públicas", "Busca web", "Official cybercrime publications"))
+            sources.extend(("Relatórios históricos na web", "Menções públicas", "Busca web",
+                            "Official cybercrime publications", "Denúncias BR", "Dorks de fraude"))
+        if os.getenv("INTELX_API_KEY", "").strip():
+            sources.append("IntelX")
         if os.getenv("RANSOMWARE_LIVE_API_KEY", "").strip():
             sources.append("Ransomware.live")
         if assessment_models():
@@ -1299,6 +1570,138 @@ def public_mentions(groups):
                 continue
             yield relation(seed, "Menção", title[:220], "Menção indexada", "Busca web pública",
                            reference=url, detail=snippet[:600], confidence="A conferir")
+
+
+BR_FRAUD_SITES = ("reclameaqui.com.br", "consumidor.gov.br", "golpes.org", "reddit.com")
+
+
+def br_fraud_mentions(terms):
+    """Scam-report mentions of a fiat indicator on Brazilian complaint portals. Low reliability."""
+    from collectors import phrase_match, web_search
+    scope = " OR ".join(f"site:{site}" for site in BR_FRAUD_SITES)
+    for seed in [row for row in terms if row["kind"] in ("PIX", "IBAN", "Conta")][:SEED_SCAN_LIMIT]:
+        phrase = seed["value"].replace('"', "")
+        for title, url, excerpt in web_search(f'"{phrase}" (golpe OR fraude OR estelionato) ({scope})'):
+            host = urlsplit(url).hostname
+            if not host or not any(host == site or host.endswith("." + site) for site in BR_FRAUD_SITES):
+                continue
+            snippet = excerpt.partition(" · ")[2]
+            if not phrase_match(title + " " + snippet, phrase):
+                continue
+            yield relation(seed, "Denúncia", (title.strip()[:220] or host), "Denúncia pública (Brasil)",
+                           "Denúncias BR", reference=url, detail=snippet[:600], confidence="A conferir")
+
+
+FRAUD_DORK_SCOPES = (
+    " (golpe OR fraude OR scam OR estelionato OR carding OR laranja OR vazamento OR dump OR leak)",
+    " (site:pastebin.com OR site:justpaste.it OR site:rentry.co OR site:telegra.ph OR site:controlc.com)",
+    " site:t.me",
+    " (filetype:txt OR filetype:csv OR filetype:json)",
+    " (site:bitcointalk.org OR site:reddit.com)",
+)
+FRAUD_TERM_KINDS = ("Wallet", "PIX", "IBAN", "Conta")
+
+
+def fraud_dorks(terms):
+    """Curated dork pack: where a fraud indicator is exposed in indexed pastes, channels, and dumps."""
+    from collectors import SearchEnginesUnavailable, web_search
+    failures = []
+    for seed in [row for row in terms if row["kind"] in FRAUD_TERM_KINDS][:SEED_SCAN_LIMIT]:
+        phrase = " ".join(seed["value"].replace('"', " ").split())
+        if not phrase:
+            continue
+        pattern = re.compile(r"(?<!\w)" + re.escape(phrase) + r"(?!\w)", re.I)
+        seen = set()
+        for scope in FRAUD_DORK_SCOPES:
+            try:
+                for title, url, excerpt in web_search(f'"{phrase}"{scope}'):
+                    reference = clean_url(url)
+                    snippet = excerpt.partition(" · ")[2]
+                    if not reference or reference in seen or not isinstance(title, str):
+                        continue
+                    if not pattern.search(title + " " + snippet):
+                        continue
+                    seen.add(reference)
+                    yield relation(seed, "Exposição", (title.strip()[:220] or urlsplit(reference).hostname),
+                                   "Indicador de fraude exposto", "Dorks de fraude", reference=reference,
+                                   detail=snippet[:600], confidence="A conferir", target_id=reference)
+            except (OSError, ValueError, SearchEnginesUnavailable) as error:
+                failures.append(error)
+    if failures:
+        raise failures[0]
+
+
+AHMIA_SEARCH = "https://ahmia.fi/search/?"
+AHMIA_RESULT_LIMIT = 8  # onion results read from one Ahmia response
+RANSOMLOOK = "https://www.ransomlook.io/api/search/"
+INTELX_HOST = "https://2.intelx.io"
+ONION_URL = r"https?://[a-z2-7]{16,56}\.onion[^\s<\"]*"
+
+
+def ahmia_matches(terms):
+    """Full-text search of Tor hidden services over clearnet (Ahmia filters CSAM via its own blacklist)."""
+    from collectors import clean
+    for seed in [row for row in terms if row["kind"] in FRAUD_TERM_KINDS][:SEED_SCAN_LIMIT]:
+        try:
+            html = download(AHMIA_SEARCH + urlencode({"q": seed["value"]}), limit=2_000_000).decode("utf-8", "replace")
+        except (OSError, ValueError):
+            continue
+        for block in re.findall(r'<li class="result"[^>]*>(.*?)</li>', html, re.S)[:AHMIA_RESULT_LIMIT]:
+            onion = re.search(ONION_URL, block, re.I)
+            if not onion:
+                continue
+            title_match = re.search(r"<a [^>]*>(.*?)</a>", block, re.S)
+            snippet_match = re.search(r"<p>(.*?)</p>", block, re.S)
+            title = clean(title_match.group(1)) if title_match else ""
+            snippet = clean(snippet_match.group(1)) if snippet_match else ""
+            yield relation(seed, "Exposição (dark)", (title[:220] or onion.group(0)[:220]),
+                           "Menção em serviço onion (Ahmia)", "Ahmia", reference=onion.group(0),
+                           detail=snippet[:600], confidence="A conferir")
+
+
+def ransomlook_matches(terms):
+    """Leak-site / ransomware-ecosystem matches from the open RansomLook tracker (clearnet API)."""
+    for seed in [row for row in terms if row["kind"] in ("Wallet", "Termo", "Grupo")][:SEED_SCAN_LIMIT]:
+        try:
+            data = json.loads(download(RANSOMLOOK + quote(seed["value"], safe=""), limit=2_000_000))
+        except (OSError, ValueError):
+            continue
+        for row in data if isinstance(data, list) else []:
+            if not isinstance(row, dict):
+                continue
+            group, title = str(row.get("group_name") or ""), str(row.get("post_title") or "")
+            if not group and not title:
+                continue
+            yield relation(seed, "Vazamento", (title[:220] or group[:220]),
+                           "Correspondência em leak-site (RansomLook)", "RansomLook",
+                           date=str(row.get("discovered") or "")[:10], reference="https://www.ransomlook.io/",
+                           detail=f"Grupo: {group}"[:600] if group else "", confidence="A conferir")
+
+
+def intelx_matches(terms, key):
+    """Best-effort IntelX intelligent search (paste/leak/darknet index). Keyed; free tier is limited."""
+    headers = {"x-key": key, "User-Agent": egress.user_agent(), "Accept": "application/json"}
+    for seed in [row for row in terms if row["kind"] in FRAUD_TERM_KINDS][:SEED_SCAN_LIMIT]:
+        body = json.dumps({"term": seed["value"], "maxresults": 10, "media": 0, "sort": 2, "terminate": []}).encode()
+        request = Request(INTELX_HOST + "/intelligent/search", data=body,
+                          headers={**headers, "Content-Type": "application/json"})
+        try:
+            with build_opener(NoRedirects(), *egress.proxy_handlers()).open(request, timeout=10) as response:
+                search_id = json.loads(response.read(100_000)).get("id")
+        except (OSError, ValueError):
+            continue
+        if not search_id:
+            continue
+        result = provider_json(f"{INTELX_HOST}/intelligent/search/result?id={quote(str(search_id), safe='')}", headers, "IntelX")
+        for row in array(result.get("records")) if isinstance(result, dict) else []:
+            if not isinstance(row, dict):
+                continue
+            name, bucket = str(row.get("name") or ""), str(row.get("bucket") or "")
+            if not name and not bucket:
+                continue
+            yield relation(seed, "Exposição", (name[:220] or bucket[:220]), "Registro indexado (IntelX)",
+                           "IntelX", date=str(row.get("date") or "")[:10],
+                           detail=f"Bucket: {bucket}"[:600] if bucket else "", confidence="A conferir")
 
 
 def keyword_matches(terms):
@@ -1476,7 +1879,7 @@ def ransomware_live_matches(terms, key):
                            confidence="Unverified claims")
 
 
-WEB_MENTION_SOURCES = ("Busca web", "GitHub público", "Mwmbl", "Arquivo.pt")
+WEB_MENTION_SOURCES = ("Busca web", "GitHub público", "Mwmbl", "Arquivo.pt", "Denúncias BR", "Dorks de fraude")
 MWMBL_LOCK = Lock()
 MWMBL_NEXT = 0.0
 
@@ -2115,6 +2518,22 @@ def stix_bundle(case):
     namespace = uuid.UUID("00abedb4-aa42-466c-9c01-fed23315a9b7")
 
     def observable(kind, raw):
+        if kind == "Wallet":
+            value = (raw or "").strip()
+            if not value:
+                return None
+            properties = {"address": value}
+            identifier = "cryptocurrency-wallet--" + str(uuid.uuid5(namespace, json.dumps(properties, sort_keys=True, separators=(",", ":"))))
+            objects.setdefault(identifier, {"type": "cryptocurrency-wallet", "spec_version": "2.1", "id": identifier, **properties})
+            return identifier
+        if kind in ("PIX", "IBAN", "Conta"):
+            value = (raw or "").strip()
+            if not value:
+                return None
+            properties = {"account_type": kind, "number": value}
+            identifier = "x-financial-account--" + str(uuid.uuid5(namespace, json.dumps(properties, sort_keys=True, separators=(",", ":"))))
+            objects.setdefault(identifier, {"type": "x-financial-account", "spec_version": "2.1", "id": identifier, **properties})
+            return identifier
         parsed = indicator(raw)
         if parsed is None or parsed[0] != kind:
             return None

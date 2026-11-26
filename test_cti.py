@@ -83,6 +83,7 @@ class ThreatIntelligence(unittest.TestCase):
         self.enter(patch.object(cti, "open_index_mentions", return_value=[]))
         self.enter(patch.object(cti, "cached_feed", return_value=b'{"values":[]}'))
         self.enter(patch.object(cti, "provider_json", return_value={"items": []}))
+        self.enter(patch.object(cti, "download", return_value=b"[]"))  # RansomLook/Ahmia stay inert offline
         search = self.enter(patch.object(collectors, "web_search", return_value=[
             ("ARTEX no GitHub", "https://github.com/example/ARTEX", "Consulta · Repositório público"),
             ("Artexx", "https://example.org/other", "Consulta · Menção a Artexx"),
@@ -112,6 +113,7 @@ class ThreatIntelligence(unittest.TestCase):
         self.enter(patch.object(cti, "attack_bundle", return_value=[]))
         self.enter(patch.object(cti, "open_index_mentions", return_value=[]))
         self.enter(patch.object(cti, "cached_feed", return_value=b'{"values":[]}'))
+        self.enter(patch.object(cti, "download", return_value=b"[]"))  # RansomLook/Ahmia stay inert offline
         self.enter(patch.object(collectors, "web_search", side_effect=collectors.SearchEnginesUnavailable(
             [["duckduckgo", "CAPTCHA"]])))
         github = self.enter(patch.object(cti, "provider_json", return_value={"items": [
@@ -611,6 +613,142 @@ class ThreatIntelligence(unittest.TestCase):
         found = list(cti.malwarebazaar_matches(cti.parse_seeds("a" * 64)))
         self.assertEqual((found[0]["source"], found[0]["target"]), ("MalwareBazaar", "Emotet"))
         self.assertTrue(found[0]["reference"].endswith("/sample/" + "a" * 64 + "/"))
+
+    def test_indicator_recognizes_crypto_wallets(self):
+        self.assertEqual(cti.indicator("0x" + "a" * 40), ("Wallet", "0x" + "a" * 40))
+        self.assertEqual(cti.indicator("4" + "A" * 94)[0], "Wallet")   # Monero
+        self.assertEqual(cti.indicator("T" + "A" * 33)[0], "Wallet")   # Tron
+        self.assertEqual(cti.indicator("wallet:ltc1qexampleforced")[0], "Wallet")  # forced any chain
+
+    def test_ofac_matches_sanctioned_wallet_offline(self):
+        blob = ("<sdnList><sdnEntry><uid>1</uid><lastName>Lazarus Group</lastName>"
+                "<programList><program>DPRK3</program></programList>"
+                "<remarks>Digital Currency Address - ETH 0x8589427373D6D84E98730D7795D8f6f8731FDA16</remarks>"
+                "</sdnEntry></sdnList>").encode()
+        self.enter(patch.object(cti, "cached_feed", return_value=blob))
+        found = list(cti.ofac_sanctions_matches(cti.parse_seeds("0x8589427373D6D84E98730D7795D8f6f8731FDA16")))
+        self.assertEqual(len(found), 1)
+        self.assertEqual((found[0]["source"], found[0]["relationship"]), ("OFAC SDN", "Endereço sancionado (OFAC SDN)"))
+        self.assertEqual(found[0]["target"], "Lazarus Group")
+        self.assertIn("ETH", found[0]["detail"])
+        self.assertIn("DPRK3", found[0]["detail"])
+
+    def test_ofac_falls_back_to_github_extract_offline(self):
+        def feed(url, limit):
+            if url == cti.OFAC_SDN_XML:
+                raise OSError("treasury unavailable")
+            return b'["0x8589427373d6d84e98730d7795d8f6f8731fda16"]' if url == cti.OFAC_GITHUB.format("ETH") else b"[]"
+        self.enter(patch.object(cti, "cached_feed", side_effect=feed))
+        found = list(cti.ofac_sanctions_matches(cti.parse_seeds("0x8589427373D6D84E98730D7795D8f6f8731FDA16")))
+        self.assertEqual((found[0]["source"], found[0]["target"]), ("OFAC SDN", "Entidade sancionada"))
+        self.assertIn("ETH", found[0]["detail"])
+
+    def test_stix_export_includes_crypto_wallet_observable(self):
+        bundle = cti.stix_bundle({"seeds": cti.parse_seeds("0x" + "a" * 40), "relations": []})
+        self.assertIn("cryptocurrency-wallet", {obj["type"] for obj in bundle["objects"]})
+
+    def test_chainabuse_matches_wallet_offline(self):
+        self.enter(patch.object(cti, "provider_json", return_value={"count": 2, "reports": [
+            {"id": "r1", "scamCategory": "PHISHING", "createdAt": "2024-07-02T00:00:00Z",
+             "addresses": [{"address": "0x" + "a" * 40, "chain": "ETH"}]},
+            {"id": "r2", "scamCategory": "PHISHING", "createdAt": "2024-08-01T00:00:00Z",
+             "addresses": [{"address": "0x" + "a" * 40, "chain": "ETH"}]}]}))
+        found = list(cti.chainabuse_matches(cti.parse_seeds("0x" + "a" * 40), "key"))
+        self.assertEqual(len(found), 1)  # two reports of the same category aggregate into one relation
+        self.assertEqual((found[0]["source"], found[0]["target"]), ("Chainabuse", "Phishing"))
+        self.assertEqual(found[0]["relationship"], "Reportado como scam (Chainabuse)")
+        self.assertEqual(found[0]["date"], "2024-08-01")
+        self.assertIn("2 denúncia", found[0]["detail"])
+
+    def test_br_fraud_mentions_scopes_to_portals_offline(self):
+        import collectors
+        results = [("Golpe PIX relatado", "https://www.reclameaqui.com.br/empresa/x/golpe-pix-390",
+                    "Query · Vítima transferiu para a chave 390.533.447-05 em golpe"),
+                   ("Nota solta", "https://exemplo.com/outro", "Query · texto sem a chave")]
+        self.enter(patch.object(collectors, "web_search", return_value=results))
+        found = list(cti.br_fraud_mentions(cti.parse_seeds("pix:390.533.447-05")))
+        self.assertEqual(len(found), 1)  # off-scope host dropped
+        self.assertEqual((found[0]["source"], found[0]["relationship"]), ("Denúncias BR", "Denúncia pública (Brasil)"))
+        self.assertTrue(found[0]["reference"].startswith("https://www.reclameaqui.com.br"))
+
+    def test_fraud_dorks_match_indicator_offline(self):
+        import collectors
+        self.enter(patch.object(collectors, "web_search", return_value=[
+            ("Dump com PIX", "https://pastebin.com/abc", "Query · chave 390.533.447-05 em lista de laranjas"),
+            ("Sem relação", "https://pastebin.com/zzz", "Query · texto qualquer")]))
+        found = list(cti.fraud_dorks(cti.parse_seeds("pix:390.533.447-05")))
+        self.assertTrue(found)
+        self.assertEqual((found[0]["source"], found[0]["relationship"]), ("Dorks de fraude", "Indicador de fraude exposto"))
+        self.assertTrue(all("390.533.447-05" in row["detail"] for row in found))
+
+    def test_ahmia_parses_onion_results_offline(self):
+        html = ('<ol><li class="result" data-v="1"><h4><a href="/search/redirect?redirect_url=x">Leak Market</a></h4>'
+                '<cite>http://abcdefghij234567.onion/leak</cite><p>chave 390.533.447-05 listada</p></li></ol>').encode()
+        self.enter(patch.object(cti, "download", return_value=html))
+        found = list(cti.ahmia_matches(cti.parse_seeds("pix:390.533.447-05")))
+        self.assertEqual((found[0]["source"], found[0]["target"]), ("Ahmia", "Leak Market"))
+        self.assertTrue(found[0]["reference"].endswith(".onion/leak"))
+
+    def test_ransomlook_matches_term_offline(self):
+        import json
+        self.enter(patch.object(cti, "download", return_value=json.dumps(
+            [{"group_name": "LockBit", "post_title": "victim-corp", "discovered": "2024-10-05 12:00:00"}]).encode()))
+        found = list(cti.ransomlook_matches(cti.parse_seeds("LockBit")))
+        self.assertEqual((found[0]["source"], found[0]["target"]), ("RansomLook", "victim-corp"))
+        self.assertEqual(found[0]["date"], "2024-10-05")
+
+    def test_fiat_validators_offline(self):
+        self.assertTrue(cti.cpf_valid("390.533.447-05"))
+        self.assertFalse(cti.cpf_valid("111.111.111-11"))
+        self.assertTrue(cti.cnpj_valid("11.222.333/0001-81"))
+        self.assertFalse(cti.cnpj_valid("11.222.333/0001-00"))
+        self.assertTrue(cti.iban_valid("GB82 WEST 1234 5698 7654 32"))
+        self.assertFalse(cti.iban_valid("GB82 WEST 1234 5698 7654 31"))
+        self.assertEqual(cti.pix_key_type("390.533.447-05"), "CPF")
+        self.assertEqual(cti.pix_key_type("fulano@banco.com.br"), "Email")
+        self.assertEqual(cti.pix_key_type("+5511999998888"), "Telefone")
+        self.assertEqual(cti.pix_key_type("123e4567-e89b-12d3-a456-426614174000"), "EVP")
+
+    def test_fiat_validation_matches_classifies_pix_offline(self):
+        found = {row["origin"]: row for row in cti.fiat_validation_matches(cti.parse_seeds(
+            "pix:390.533.447-05\niban:GB82 WEST 1234 5698 7654 32"))}
+        pix = found["390.533.447-05"]
+        self.assertEqual((pix["source"], pix["target"], pix["relationship"]),
+                         ("Validação local", "CPF", "Chave PIX válida"))
+        iban = found["GB82WEST12345698765432"]
+        self.assertEqual((iban["source"], iban["target"]), ("Validação local", "Válido"))
+
+    def test_stix_export_includes_financial_account_observable(self):
+        bundle = cti.stix_bundle({"seeds": cti.parse_seeds("pix:fulano@banco.com.br"), "relations": []})
+        self.assertIn("x-financial-account", {obj["type"] for obj in bundle["objects"]})
+
+    def test_ransomwhere_matches_wallet_offline(self):
+        import json
+        export = json.dumps({"result": [
+            {"address": "1BitcoinEaterAddressDontSendf59kuE", "family": "Conti", "blockchain": "bitcoin",
+             "balanceUSD": 123456.0, "createdAt": "2023-02-01T00:00:00Z"}]}).encode()
+        self.enter(patch.object(cti, "cached_feed", return_value=export))
+        found = list(cti.ransomwhere_matches(cti.parse_seeds("wallet:1BitcoinEaterAddressDontSendf59kuE")))
+        self.assertEqual((found[0]["source"], found[0]["target"]), ("Ransomwhere", "Conti"))
+        self.assertEqual(found[0]["relationship"], "Endereço de pagamento de ransomware (Ransomwhere)")
+        self.assertIn("US$", found[0]["detail"])
+
+    def test_mempool_matches_btc_wallet_offline(self):
+        self.enter(patch.object(cti, "provider_json", return_value={
+            "chain_stats": {"funded_txo_sum": 150000000, "spent_txo_sum": 50000000, "tx_count": 7}}))
+        found = list(cti.mempool_matches(cti.parse_seeds("bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq")))
+        self.assertEqual(found[0]["source"], "mempool.space")
+        self.assertIn("1.00000000 BTC", found[0]["detail"])  # 1.5 funded - 0.5 spent
+        self.assertIn("7 tx", found[0]["detail"])
+
+    def test_etherscan_reports_balance_and_first_seen_offline(self):
+        responses = iter([{"status": "1", "message": "OK", "result": "2000000000000000000"},
+                          {"status": "1", "message": "OK", "result": [{"timeStamp": "1609459200", "hash": "0x1"}]}])
+        self.enter(patch.object(cti, "provider_json", side_effect=lambda *a, **k: next(responses)))
+        found = list(cti.etherscan_matches(cti.parse_seeds("0x" + "b" * 40), "key"))
+        self.assertEqual((found[0]["source"], found[0]["relationship"]), ("Etherscan", "Atividade on-chain (Etherscan)"))
+        self.assertIn("2.000000 ETH", found[0]["detail"])
+        self.assertEqual(found[0]["date"], "2021-01-01")
 
     def test_otx_matches_pulses_offline(self):
         self.enter(patch.object(cti, "provider_json", return_value={
