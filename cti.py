@@ -836,6 +836,49 @@ CENSYS_SERVICE_LIMIT = 50
 PDNS_RECORD_LIMIT = 50
 
 
+CHAINABUSE = "https://api.chainabuse.com/v0/reports"
+CHAINABUSE_REPORT_LIMIT = 50  # reports read from one Chainabuse response
+
+
+def _chainabuse_chain(value):
+    """Best-effort chain hint for the screening query; empty when the format is unsupported."""
+    if value.startswith("0x"):
+        return "ETH"
+    if value.startswith(("bc1", "1", "3")):
+        return "BTC"
+    if value.startswith("T"):
+        return "TRON"
+    return ""
+
+
+def chainabuse_matches(seeds, key):
+    token = base64.b64encode(f"{key}:".encode()).decode()  # API key in the username field, blank password
+    for seed in seeds:
+        if seed["kind"] != "Wallet":
+            continue
+        params = {"address": seed["value"]}
+        chain = _chainabuse_chain(seed["value"])
+        if chain:
+            params["chain"] = chain
+        result = provider_json(f"{CHAINABUSE}?{urlencode(params)}", {"Authorization": "Basic " + token}, "Chainabuse")
+        if result is None:
+            continue
+        categories = {}
+        for row in array(result.get("reports"))[:CHAINABUSE_REPORT_LIMIT]:
+            if not isinstance(row, dict):
+                continue
+            category = (str(row.get("scamCategory") or "").strip() or "OTHER").replace("_", " ").title()
+            bucket = categories.setdefault(category, {"count": 0, "latest": ""})
+            bucket["count"] += 1
+            bucket["latest"] = max(bucket["latest"], str(row.get("createdAt") or "")[:10])
+        reference = "https://www.chainabuse.com/address/" + quote(seed["value"], safe="")
+        for category, info in categories.items():
+            yield relation(seed, "Golpe", category[:200], "Reportado como scam (Chainabuse)", "Chainabuse",
+                           date=info["latest"], reference=reference,
+                           detail=f"{info['count']} denúncia(s) comunitária(s) · categoria {category}"[:600],
+                           confidence="A conferir")
+
+
 def otx_matches(seeds, key):
     sections = {"Domínio": "domain", "Hash": "file", "URL": "url"}
     for seed in seeds:
@@ -1328,6 +1371,7 @@ def historical_web_matches(seeds):
 
 def authenticated_sources():
     return {"ThreatFox": ("THREATFOX_AUTH_KEY", threatfox_matches),
+            "Chainabuse": ("CHAINABUSE_API_KEY", chainabuse_matches),
             "VirusTotal": ("VIRUSTOTAL_API_KEY", virustotal_matches),
             "Shodan": ("SHODAN_API_KEY", shodan_matches),
             "OTX": ("OTX_API_KEY", otx_matches),

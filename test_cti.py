@@ -645,6 +645,19 @@ class ThreatIntelligence(unittest.TestCase):
         bundle = cti.stix_bundle({"seeds": cti.parse_seeds("0x" + "a" * 40), "relations": []})
         self.assertIn("cryptocurrency-wallet", {obj["type"] for obj in bundle["objects"]})
 
+    def test_chainabuse_matches_wallet_offline(self):
+        self.enter(patch.object(cti, "provider_json", return_value={"count": 2, "reports": [
+            {"id": "r1", "scamCategory": "PHISHING", "createdAt": "2024-07-02T00:00:00Z",
+             "addresses": [{"address": "0x" + "a" * 40, "chain": "ETH"}]},
+            {"id": "r2", "scamCategory": "PHISHING", "createdAt": "2024-08-01T00:00:00Z",
+             "addresses": [{"address": "0x" + "a" * 40, "chain": "ETH"}]}]}))
+        found = list(cti.chainabuse_matches(cti.parse_seeds("0x" + "a" * 40), "key"))
+        self.assertEqual(len(found), 1)  # two reports of the same category aggregate into one relation
+        self.assertEqual((found[0]["source"], found[0]["target"]), ("Chainabuse", "Phishing"))
+        self.assertEqual(found[0]["relationship"], "Reportado como scam (Chainabuse)")
+        self.assertEqual(found[0]["date"], "2024-08-01")
+        self.assertIn("2 denúncia", found[0]["detail"])
+
     def test_otx_matches_pulses_offline(self):
         self.enter(patch.object(cti, "provider_json", return_value={
             "pulse_info": {"pulses": [{"name": "APT Example campaign", "id": "p1", "modified": "2024-08-01",

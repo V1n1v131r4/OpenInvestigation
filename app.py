@@ -120,6 +120,7 @@ def submit_cti_iocs(case_id, seeds, entries, sources):
     values = [seed["value"] for seed in seeds]
     tasks = [COLLECTORS.submit(cti_stage, case_id, "MISP local", lambda: cti.misp_matches(seeds, entries), values)]
     has_iocs = any(seed["kind"] in ("IP", "URL", "Domínio", "Hash") for seed in seeds)
+    has_wallet = any(seed["kind"] == "Wallet" for seed in seeds)
     if "Histórico local" in sources and has_iocs:
         tasks.append(COLLECTORS.submit(cti_stage, case_id, "Histórico local", lambda: cti.local_history_matches(seeds), values))
     if "Relatórios históricos na web" in sources and has_iocs:
@@ -145,7 +146,7 @@ def submit_cti_iocs(case_id, seeds, entries, sources):
         tasks.append(COLLECTORS.submit(cti_stage, case_id, "crt.sh", lambda: cti.crtsh_matches(seeds), values))
     if "RIPEstat" in sources and any(seed["kind"] in ("IP", "ASN") for seed in seeds):
         tasks.append(COLLECTORS.submit(cti_stage, case_id, "RIPEstat", lambda: cti.ripestat_matches(seeds), values))
-    if has_iocs:
+    if has_iocs or has_wallet:
         for source, (variable, collector) in cti.authenticated_sources().items():
             if source in sources:
                 tasks.append(COLLECTORS.submit(cti_stage, case_id, source,
