@@ -126,7 +126,7 @@ class ThreatIntelligence(unittest.TestCase):
         self.assertEqual(case["status"], "partial")
         self.assertTrue(any(event["source"] == "Busca web" and event["status"] == "error" for event in case["events"]))
         self.assertEqual({row["source"] for row in case["relations"]}, {"GitHub público", "OpenCode"})
-        self.assertIn("api.github.com/search/repositories?", github.call_args.args[0])
+        self.assertTrue(any("api.github.com/search/repositories?" in call.args[0] for call in github.call_args_list))
         self.assertIn("V1n1v131r4/ARTEX", runner.call_args.args[1])
 
     def test_term_is_verified_and_automatically_expanded_before_assessment(self):
@@ -682,20 +682,30 @@ class ThreatIntelligence(unittest.TestCase):
         self.assertTrue(all("390.533.447-05" in row["detail"] for row in found))
 
     def test_ahmia_parses_onion_results_offline(self):
-        html = ('<ol><li class="result" data-v="1"><h4><a href="/search/redirect?redirect_url=x">Leak Market</a></h4>'
-                '<cite>http://abcdefghij234567.onion/leak</cite><p>chave 390.533.447-05 listada</p></li></ol>').encode()
-        self.enter(patch.object(cti, "download", return_value=html))
+        home = b'<form id="searchForm" action="/search/" method="get"><input type="hidden" name="0cb369" value="7b6027"></form>'
+        results = ('<ol><li class="result"><h4><a href="/search/redirect?redirect_url=http://abcdefghij234567.onion/leak">'
+                   'Leak Market</a></h4><cite>abcdefghij234567.onion</cite><p>chave 390.533.447-05 listada</p></li></ol>').encode()
+        self.enter(patch.object(cti, "download", side_effect=[home, results]))
         found = list(cti.ahmia_matches(cti.parse_seeds("pix:390.533.447-05")))
         self.assertEqual((found[0]["source"], found[0]["target"]), ("Ahmia", "Leak Market"))
         self.assertTrue(found[0]["reference"].endswith(".onion/leak"))
 
+    def test_ahmia_without_token_yields_nothing_offline(self):
+        self.enter(patch.object(cti, "download", return_value=b"<html>no form here</html>"))
+        self.assertEqual(list(cti.ahmia_matches(cti.parse_seeds("pix:390.533.447-05"))), [])
+
     def test_ransomlook_matches_term_offline(self):
-        import json
-        self.enter(patch.object(cti, "download", return_value=json.dumps(
-            [{"group_name": "LockBit", "post_title": "victim-corp", "discovered": "2024-10-05 12:00:00"}]).encode()))
-        found = list(cti.ransomlook_matches(cti.parse_seeds("LockBit")))
-        self.assertEqual((found[0]["source"], found[0]["target"]), ("RansomLook", "victim-corp"))
-        self.assertEqual(found[0]["date"], "2024-10-05")
+        self.enter(patch.object(cti, "provider_json", return_value={
+            "groups": [{"name": "lockbit", "meta": "LockBit ransomware family"},
+                       {"name": "3am", "meta": "fallback when LockBit fails"}],
+            "posts": [{"post_title": "victim-corp", "discovered": "2025-12-05 11:26:01", "description": "leak", "link": ""}],
+            "markets": [], "leaks": [], "notes": []}))
+        found = {row["target"]: row for row in cti.ransomlook_matches(cti.parse_seeds("lockbit"))}
+        self.assertIn("lockbit", found)       # group kept: name matches the query
+        self.assertNotIn("3am", found)         # group dropped: only a profile-text mention
+        self.assertEqual(found["lockbit"]["relationship"], "Grupo de ransomware (RansomLook)")
+        self.assertEqual((found["victim-corp"]["source"], found["victim-corp"]["date"]),
+                         ("RansomLook", "2025-12-05"))
 
     def test_fiat_validators_offline(self):
         self.assertTrue(cti.cpf_valid("390.533.447-05"))
